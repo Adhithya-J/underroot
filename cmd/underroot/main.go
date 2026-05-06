@@ -15,7 +15,7 @@ func main() {
 	client := ai.NewClient(cfg)
 	a := agent.NewAgent(client)
 
-	input := "echo 'Hello from Underroot'"
+	input := "echo 'Hello from Underroot', Invoke-Expression"
 	err := a.Run(input)
 	if err != nil {
 		log.Fatalf("Agent run failed: %v", err)
