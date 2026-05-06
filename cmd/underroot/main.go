@@ -1,7 +1,22 @@
 package main
 
-import "fmt"
+import (
+	"log"
+	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/agent"
+)
 
 func main() {
-	fmt.Println("Hello, World")
+	cfg := ai.Config{
+		UseMock: true,
+	}
+	
+	client := ai.NewClient(cfg)
+	a := agent.NewAgent(client)
+
+	input := "echo 'Hello from Underroot'"
+	err := a.Run(input)
+	if err != nil {
+		log.Fatalf("Agent run failed: %v", err)
+	}
 }
