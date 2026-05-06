@@ -2,8 +2,10 @@ package agent
 
 import (
 	"fmt"
+
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/powershell"
+	"github.com/Adhithya-J/underroot.git/internal/validator"
 )
 
 const maxRetries = 3
@@ -20,10 +22,10 @@ func NewAgent(aiClient *ai.Client) *Agent {
 
 func (a *Agent) Run(input string) error {
 	currentPrompt := input
-	
+
 	for i := 0; i < maxRetries; i++ {
 		fmt.Printf("\n--- Attempt %d ---\n", i+1)
-		
+
 		resp, err := a.aiClient.GetShellScript(currentPrompt)
 		if err != nil {
 			return fmt.Errorf("failed to get shell script: %w", err)
@@ -31,6 +33,10 @@ func (a *Agent) Run(input string) error {
 
 		if !resp.IsSafe {
 			return fmt.Errorf("script is not safe: %s", resp.Explanation)
+		}
+
+		if err := validator.Validate(resp.Script); err != nil {
+			return fmt.Errorf("script is not safe: %s", err)
 		}
 
 		fmt.Printf("Executing: %s\n", resp.Script)
