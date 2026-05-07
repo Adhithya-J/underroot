@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/powershell"
@@ -21,51 +22,78 @@ func NewAgent(aiClient *ai.Client) *Agent {
 }
 
 func (a *Agent) Run(input string) error {
-	currentPrompt := input
+
+	var history strings.Builder
+
+	history.WriteString("User Request\n")
+	history.WriteString(input)
+	history.WriteString("\n")
+
+	// currentPrompt := input
 
 	for i := 0; i < maxRetries; i++ {
 
-		fmt.Printf("\n--- Attempt %d ---\n", i+1)
+		fmt.Printf("\n--- Attempt %d/%d ---\n", i+1, maxRetries)
+
+		currentPrompt := history.String()
 
 		resp, err := a.aiClient.GetShellScript(currentPrompt)
-		currentPrompt += fmt.Sprintf("\n--- Attempt %d ---\n")
-		currentPrompt += fmt.Sprintf("\n%v+", resp)
 
 		if err != nil {
-			currentError := fmt.Errorf("failed to get shell script: %w", err).Error()
-			currentPrompt += currentError
-			fmt.Println(currentError)
+			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
+			fmt.Println(errMsg)
+			history.WriteString(errMsg)
 			continue
 		}
 
+		history.WriteString("\nScript\n")
+		history.WriteString(resp.Script)
+		history.WriteString("\n")
+
+		history.WriteString("\nExplanation\n")
+		history.WriteString(resp.Explanation)
+		history.WriteString("\n")
+
+		// AI based Safety
 		if !resp.IsSafe {
-			currentError := fmt.Errorf("script is not safe: %s", resp.Explanation).Error()
-			currentPrompt += currentError
-			fmt.Println(currentError)
+			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
+			history.WriteString(errMsg)
+			fmt.Println(errMsg)
 			continue
 
 		}
 
+		// Static rule based check
 		if err := validator.Validate(resp.Script); err != nil {
-			currentError := fmt.Errorf("script is not safe: %s", err).Error()
-			currentPrompt += currentError
-			fmt.Println(currentError)
+			errMsg := fmt.Sprintf("Validation failed: %s", err)
+			history.WriteString(errMsg)
+			fmt.Println(errMsg)
 			continue
 
 		}
 
-		fmt.Printf("Executing: %s\n", resp.Script)
+		fmt.Printf("Script: %s\n", resp.Script)
 		fmt.Printf("Explanation: %s\n", resp.Explanation)
+		fmt.Printf("Executing Script....")
 
-		err = powershell.ExecuteScript(resp.Script)
-		if err == nil {
-			fmt.Println("Success!")
-			return nil
+		if err = powershell.ExecuteScript(resp.Script); err != nil {
+
+			errMsg := fmt.Sprintf("Execution failed: %s", err)
+
+			history.WriteString("\nExecution Error\n")
+			history.WriteString(errMsg)
+			history.WriteString("\n")
+			history.WriteString("Please fix the script based on the above error\n")
+			fmt.Printf("Execution failed: %v\n", errMsg)
+
+			continue
+			// Feed the error back to the AI for the next iteration
+
 		}
 
-		fmt.Printf("Execution failed: %v\n", err)
-		// Feed the error back to the AI for the next iteration
-		// currentPrompt = fmt.Sprintf("The previous script failed with the following error. Please fix it:\n%v", err)
+		fmt.Println("Success!")
+		return nil
+
 	}
 
 	return fmt.Errorf("failed after %d attempts", maxRetries)
