@@ -24,19 +24,34 @@ func (a *Agent) Run(input string) error {
 	currentPrompt := input
 
 	for i := 0; i < maxRetries; i++ {
+
 		fmt.Printf("\n--- Attempt %d ---\n", i+1)
 
 		resp, err := a.aiClient.GetShellScript(currentPrompt)
+		currentPrompt += fmt.Sprintf("\n--- Attempt %d ---\n")
+		currentPrompt += fmt.Sprintf("\n%v+", resp)
+
 		if err != nil {
-			return fmt.Errorf("failed to get shell script: %w", err)
+			currentError := fmt.Errorf("failed to get shell script: %w", err).Error()
+			currentPrompt += currentError
+			fmt.Println(currentError)
+			continue
 		}
 
 		if !resp.IsSafe {
-			return fmt.Errorf("script is not safe: %s", resp.Explanation)
+			currentError := fmt.Errorf("script is not safe: %s", resp.Explanation).Error()
+			currentPrompt += currentError
+			fmt.Println(currentError)
+			continue
+
 		}
 
 		if err := validator.Validate(resp.Script); err != nil {
-			return fmt.Errorf("script is not safe: %s", err)
+			currentError := fmt.Errorf("script is not safe: %s", err).Error()
+			currentPrompt += currentError
+			fmt.Println(currentError)
+			continue
+
 		}
 
 		fmt.Printf("Executing: %s\n", resp.Script)
@@ -50,7 +65,7 @@ func (a *Agent) Run(input string) error {
 
 		fmt.Printf("Execution failed: %v\n", err)
 		// Feed the error back to the AI for the next iteration
-		currentPrompt = fmt.Sprintf("The previous script failed with the following error. Please fix it:\n%v", err)
+		// currentPrompt = fmt.Sprintf("The previous script failed with the following error. Please fix it:\n%v", err)
 	}
 
 	return fmt.Errorf("failed after %d attempts", maxRetries)
