@@ -114,6 +114,11 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		return nil, fmt.Errorf("empty response")
 	}
 
+	c.history = append(c.history, Message{
+		Role:    "assistant",
+		Content: result.Choices[0].Message.Content,
+	})
+
 	var agentResp AgentResponse
 
 	if err := json.Unmarshal(
@@ -123,5 +128,8 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		return nil, err
 	}
 
+	// fmt.Print("\n\nHistory:\n")
+	// fmt.Println(c.history)
+	// fmt.Print("\nHistory:\n")
 	return &agentResp, nil
 }
