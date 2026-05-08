@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Message represents a single turn in the AI conversation history.
@@ -30,13 +31,17 @@ type Config struct {
 }
 
 type Client struct {
-	config  Config
-	history []Message
+	config     Config
+	httpClient *http.Client
+	history    []Message
 }
 
 func NewClient(cfg Config) *Client {
 	return &Client{
 		config: cfg,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 		history: []Message{
 			{
 				Role:    "system",
@@ -72,7 +77,7 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 
 	req, err := http.NewRequestWithContext(
 		ctx,
-		"POST",
+		http.MethodPost,
 		c.config.OpenAIBaseURL+"/chat/completions",
 		bytes.NewBuffer(data),
 	)
@@ -83,7 +88,7 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

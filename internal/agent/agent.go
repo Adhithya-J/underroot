@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/powershell"
@@ -28,7 +29,13 @@ func (a *Agent) Run(input string) error {
 
 		fmt.Printf("\n--- Attempt %d ---\n", i+1)
 
-		resp, err := a.aiClient.GetShellScript(context.Background(),
+		ctx, cancel := context.WithTimeout(
+			context.Background(),
+			45*time.Second,
+		)
+		defer cancel()
+
+		resp, err := a.aiClient.GetShellScript(ctx,
 			currentPrompt)
 		currentPrompt += fmt.Sprintf("\n--- Attempt %d ---\n")
 		currentPrompt += fmt.Sprintf("\n%v+", resp)
