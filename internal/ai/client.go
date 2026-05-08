@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -33,16 +34,30 @@ type Client struct {
 	history []Message
 }
 
-func NewClient(cfg Config) *Client {
+func NewClient(cfg Config) (*Client, error) {
+	if cfg.UseMock {
+		if cfg.OpenAIAPIKey == "" {
+			return nil, errors.New("Missing OpenAI API Key")
+		}
+
+		if cfg.OpenAIBaseURL == "" {
+			return nil, errors.New("Missing OpenAI Base URL")
+		}
+
+		if cfg.Model == "" {
+			return nil, errors.New("Missing OpenAI Model")
+		}
+
+	}
 	return &Client{
 		config: cfg,
 		history: []Message{
 			{
 				Role:    "system",
-				Content: "You are a senior engineer and security expert. Your task is to generate bash scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema.",
+				Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema.",
 			},
 		},
-	}
+	}, nil
 }
 
 func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
@@ -88,6 +103,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("api returned %d", resp.StatusCode)
 	}
 

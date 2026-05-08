@@ -12,12 +12,15 @@ func main() {
 		UseMock: true,
 	}
 
-	client := ai.NewClient(cfg)
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		log.Fatalf("OpenAI Client initialization failed: %v", err)
+	}
 	a := agent.NewAgent(client)
 
 	input := "echo 'Hello from Underroot', Invoke-Expression"
-	err := a.Run(input)
+	run_err := a.Run(input)
 	if err != nil {
-		log.Fatalf("Agent run failed: %v", err)
+		log.Fatalf("Agent run failed: %v", run_err)
 	}
 }
