@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -75,10 +76,18 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		return nil, err
 	}
 
+	endpoint, err := url.JoinPath(
+		c.config.OpenAIBaseURL,
+		"chat/completions",
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		c.config.OpenAIBaseURL+"/chat/completions",
+		endpoint,
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
