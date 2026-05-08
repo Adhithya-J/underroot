@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
@@ -27,7 +28,8 @@ func (a *Agent) Run(input string) error {
 
 		fmt.Printf("\n--- Attempt %d ---\n", i+1)
 
-		resp, err := a.aiClient.GetShellScript(currentPrompt)
+		resp, err := a.aiClient.GetShellScript(context.Background(),
+			currentPrompt)
 		currentPrompt += fmt.Sprintf("\n--- Attempt %d ---\n")
 		currentPrompt += fmt.Sprintf("\n%v+", resp)
 

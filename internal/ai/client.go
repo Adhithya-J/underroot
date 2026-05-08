@@ -2,6 +2,7 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -45,7 +46,7 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
-func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
+func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentResponse, error) {
 	if c.config.UseMock {
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
@@ -69,7 +70,8 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(
+		ctx,
 		"POST",
 		c.config.OpenAIBaseURL+"/chat/completions",
 		bytes.NewBuffer(data),
