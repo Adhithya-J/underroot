@@ -24,10 +24,10 @@ type Agent struct {
 // But I think when we run into an execution error, we can be sure that the script has passed the safety and validation error and those errors can be removed from error history
 
 type AgentError struct {
-	errorType string
-	errorMsg  string
-	script    string
-	output    string
+	ErrorType string `json:"error_type"`
+	ErrorMsg  string `json:"error_msg"`
+	Script    string `json:"script"`
+	Output    string `json:"output"`
 }
 
 func NewAgent(aiClient *ai.Client) *Agent {
@@ -57,15 +57,28 @@ func (a *Agent) Run(input string) error {
 
 		resp, body, err := a.aiClient.GetShellScript(currentPrompt)
 
-		if err != nil {
+		if err != nil || resp.Script == "" {
 			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
 			fmt.Println(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
-				errorType: "ai generation failure",
-				errorMsg:  errMsg + body,
-				script:    "",
-				output:    "",
+				ErrorType: "ai generation failure",
+				ErrorMsg:  errMsg + body,
+				Script:    "",
+				Output:    "",
+			})
+			continue
+		}
+
+		if resp.Script == "" {
+			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
+			fmt.Println(errMsg)
+
+			ErrorHistory = append(ErrorHistory, AgentError{
+				ErrorType: "ai generation failured with empty string",
+				ErrorMsg:  errMsg + body,
+				Script:    resp.Script,
+				Output:    "",
 			})
 			continue
 		}
@@ -75,10 +88,10 @@ func (a *Agent) Run(input string) error {
 			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
-				errorType: "AI safety validation failed",
-				errorMsg:  errMsg,
-				script:    resp.Script,
-				output:    "",
+				ErrorType: "AI safety validation failed",
+				ErrorMsg:  errMsg,
+				Script:    resp.Script,
+				Output:    "",
 			})
 			continue
 
@@ -89,10 +102,10 @@ func (a *Agent) Run(input string) error {
 			errMsg := fmt.Sprintf("Validation failed: %s", err)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
-				errorType: "rule based safety validation failed",
-				errorMsg:  errMsg,
-				script:    resp.Script,
-				output:    "",
+				ErrorType: "rule based safety validation failed",
+				ErrorMsg:  errMsg,
+				Script:    resp.Script,
+				Output:    "",
 			})
 			continue
 
@@ -109,10 +122,10 @@ func (a *Agent) Run(input string) error {
 
 			fmt.Printf("Execution failed: %v\n", errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
-				errorType: "script execution failed",
-				errorMsg:  errMsg,
-				script:    resp.Script,
-				output:    psOut,
+				ErrorType: "script execution failed",
+				ErrorMsg:  errMsg,
+				Script:    resp.Script,
+				Output:    psOut,
 			})
 
 			continue
