@@ -35,7 +35,7 @@ type Client struct {
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	if cfg.UseMock {
+	if !cfg.UseMock {
 		if cfg.OpenAIAPIKey == "" {
 			return nil, errors.New("Missing OpenAI API Key")
 		}
