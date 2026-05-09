@@ -19,8 +19,8 @@ func main() {
 	a := agent.NewAgent(client)
 
 	input := "echo 'Hello from Underroot', Invoke-Expression"
-	run_err := a.Run(input)
+	runErr := a.Run(input)
 	if err != nil {
-		log.Fatalf("Agent run failed: %v", run_err)
+		log.Fatalf("Agent run failed: %v", runErr)
 	}
 }
