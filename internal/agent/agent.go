@@ -15,6 +15,21 @@ type Agent struct {
 	aiClient *ai.Client
 }
 
+// there are few types of errors - validation error (misspellings), safety error(blacklisted keywords), ai generation error (malformed script) and execution error (logic, permissions).
+// The agent should know which type of error it is dealing with and take action appropriately. Also the structure would be different
+// For the initial version, let's build a basic version of error type (unified)
+
+// Also should entire error history be included?
+// A naive approach would be to use the entire error history
+// But I think when we run into an execution error, we can be sure that the script has passed the safety and validation error and those errors can be removed from error history
+
+type AgentError struct {
+	errorType string
+	errorMsg  string
+	script    string
+	output    string
+}
+
 func NewAgent(aiClient *ai.Client) *Agent {
 	return &Agent{
 		aiClient: aiClient,
@@ -22,6 +37,8 @@ func NewAgent(aiClient *ai.Client) *Agent {
 }
 
 func (a *Agent) Run(input string) error {
+
+	var ErrorHistory []AgentError
 
 	var history strings.Builder
 
@@ -42,23 +59,32 @@ func (a *Agent) Run(input string) error {
 		if err != nil {
 			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
 			fmt.Println(errMsg)
-			history.WriteString(errMsg)
+			// history.WriteString(errMsg)
+
+			ErrorHistory = append(ErrorHistory, AgentError{
+				errorType: "ai generation failure",
+				errorMsg:  errMsg,
+				script:    "",
+				output:    "",
+			})
 			continue
 		}
 
-		history.WriteString("\nScript\n")
-		history.WriteString(resp.Script)
-		history.WriteString("\n")
-
-		history.WriteString("\nExplanation\n")
-		history.WriteString(resp.Explanation)
-		history.WriteString("\n")
+		// history.WriteString("\nScript\n")
+		// history.WriteString(resp.Script)
+		// history.WriteString("\n")
 
 		// AI based Safety
 		if !resp.IsSafe {
 			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
-			history.WriteString(errMsg)
+			// history.WriteString(errMsg)
 			fmt.Println(errMsg)
+			ErrorHistory = append(ErrorHistory, AgentError{
+				errorType: "AI safety validation failed",
+				errorMsg:  errMsg,
+				script:    resp.Script,
+				output:    "",
+			})
 			continue
 
 		}
@@ -66,8 +92,14 @@ func (a *Agent) Run(input string) error {
 		// Static rule based check
 		if err := validator.Validate(resp.Script); err != nil {
 			errMsg := fmt.Sprintf("Validation failed: %s", err)
-			history.WriteString(errMsg)
+			// history.WriteString(errMsg)
 			fmt.Println(errMsg)
+			ErrorHistory = append(ErrorHistory, AgentError{
+				errorType: "rule based safety validation failed",
+				errorMsg:  errMsg,
+				script:    resp.Script,
+				output:    "",
+			})
 			continue
 
 		}
@@ -80,11 +112,18 @@ func (a *Agent) Run(input string) error {
 
 			errMsg := fmt.Sprintf("Execution failed: %s", err)
 
-			history.WriteString("\nExecution Error\n")
-			history.WriteString(errMsg)
-			history.WriteString("\n")
-			history.WriteString("Please fix the script based on the above error\n")
+			// history.WriteString("\nExecution Error\n")
+			// history.WriteString(errMsg)
+			// history.WriteString("\n")
+			// history.WriteString("Please fix the script based on the above error\n")
+
 			fmt.Printf("Execution failed: %v\n", errMsg)
+			ErrorHistory = append(ErrorHistory, AgentError{
+				errorType: "script execution failed",
+				errorMsg:  errMsg,
+				script:    resp.Script,
+				output:    "",
+			})
 
 			continue
 			// Feed the error back to the AI for the next iteration
