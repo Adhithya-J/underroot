@@ -3,7 +3,6 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/powershell"
@@ -41,13 +40,7 @@ func (a *Agent) Run(input string) error {
 
 	var ErrorHistory []AgentError
 
-	var history strings.Builder
-
-	history.WriteString("User Request\n")
-	history.WriteString(input)
-	history.WriteString("\n")
-
-	// currentPrompt := input
+	currentPrompt := input
 
 	for i := 0; i < maxRetries; i++ {
 
@@ -58,16 +51,15 @@ func (a *Agent) Run(input string) error {
 			fmt.Println("Error parsing json")
 		}
 
-		history.WriteString(string(jsonOut))
+		ErrorHistoryStr := string(jsonOut)
 
-		currentPrompt := history.String()
+		currentPrompt += ErrorHistoryStr
 
 		resp, err := a.aiClient.GetShellScript(currentPrompt)
 
 		if err != nil {
 			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
 			fmt.Println(errMsg)
-			// history.WriteString(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
 				errorType: "ai generation failure",
@@ -78,14 +70,9 @@ func (a *Agent) Run(input string) error {
 			continue
 		}
 
-		// history.WriteString("\nScript\n")
-		// history.WriteString(resp.Script)
-		// history.WriteString("\n")
-
 		// AI based Safety
 		if !resp.IsSafe {
 			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
-			// history.WriteString(errMsg)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				errorType: "AI safety validation failed",
@@ -100,7 +87,6 @@ func (a *Agent) Run(input string) error {
 		// Static rule based check
 		if err := validator.Validate(resp.Script); err != nil {
 			errMsg := fmt.Sprintf("Validation failed: %s", err)
-			// history.WriteString(errMsg)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				errorType: "rule based safety validation failed",
@@ -119,11 +105,6 @@ func (a *Agent) Run(input string) error {
 		if err = powershell.ExecuteScript(resp.Script); err != nil {
 
 			errMsg := fmt.Sprintf("Execution failed: %s", err)
-
-			// history.WriteString("\nExecution Error\n")
-			// history.WriteString(errMsg)
-			// history.WriteString("\n")
-			// history.WriteString("Please fix the script based on the above error\n")
 
 			fmt.Printf("Execution failed: %v\n", errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
