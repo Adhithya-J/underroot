@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -51,6 +52,13 @@ func (a *Agent) Run(input string) error {
 	for i := 0; i < maxRetries; i++ {
 
 		fmt.Printf("\n--- Attempt %d/%d ---\n", i+1, maxRetries)
+
+		jsonOut, jsonErr := json.Marshal(ErrorHistory)
+		if jsonErr != nil {
+			fmt.Println("Error parsing json")
+		}
+
+		history.WriteString(string(jsonOut))
 
 		currentPrompt := history.String()
 
