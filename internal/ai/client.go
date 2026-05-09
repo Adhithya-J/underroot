@@ -26,7 +26,7 @@ type AgentResponse struct {
 type Config struct {
 	OpenAIAPIKey  string
 	OpenAIBaseURL string
-	Model         string
+	OpenAIModel   string
 	UseMock       bool
 }
 
@@ -45,7 +45,7 @@ func NewClient(cfg Config) (*Client, error) {
 			return nil, errors.New("Missing OpenAI Base URL")
 		}
 
-		if cfg.Model == "" {
+		if cfg.OpenAIModel == "" {
 			return nil, errors.New("Missing OpenAI Model")
 		}
 
@@ -76,7 +76,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	})
 
 	body := map[string]interface{}{
-		"model":    c.config.Model,
+		"model":    c.config.OpenAIModel,
 		"messages": c.history,
 	}
 

@@ -9,13 +9,16 @@ import (
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	godotenv.Load()
+
 	cfg := ai.Config{
-		OpenAIBaseURL: "http://localhost:8080/",
-		OpenAIAPIKey:  "None",
-		Model:         "not-needed",
+		OpenAIBaseURL: os.Getenv("OpenAIBaseURL"), //"http://localhost:8080/",
+		OpenAIAPIKey:  os.Getenv("OpenAIAPIKey"),
+		OpenAIModel:   os.Getenv("OpenAIModel"),
 		UseMock:       false,
 	}
 
