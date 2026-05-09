@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
@@ -17,10 +21,31 @@ func main() {
 		log.Fatalf("OpenAI Client initialization failed: %v", err)
 	}
 	a := agent.NewAgent(client)
+	fmt.Print("--------------------\n")
+	fmt.Print("\tUnderroot\n")
+	fmt.Print("--------------------\n")
+	fmt.Print("\nHit enter or type quit or exit to close the application\n")
+	fmt.Print("--------------------\n")
+	for {
+		scanner := bufio.NewReader(os.Stdin)
+		fmt.Print("> ")
+		txt, err := scanner.ReadString('\n') //single quotes!
+		if err != nil {
+			panic(err)
+		}
+		txt = strings.TrimSpace(txt)
+		lowerTxt := strings.ToLower(txt)
 
-	input := "echo 'Hello from Underroot', Invoke-Expression"
-	runErr := a.Run(input)
-	if err != nil {
-		log.Fatalf("Agent run failed: %v", runErr)
+		if lowerTxt == "" || lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit" {
+			break
+		}
+		input := txt
+		runErr := a.Run(input)
+		if runErr != nil {
+			log.Fatalf("Agent run failed: %v", runErr)
+		}
+		fmt.Print("--------------------\n")
+
 	}
+
 }
