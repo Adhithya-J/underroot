@@ -55,7 +55,7 @@ func NewClient(cfg Config) (*Client, error) {
 		history: []Message{
 			{
 				Role:    "system",
-				Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema.",
+				Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema with keys as script, explanation, and is_safe",
 			},
 		},
 	}, nil
