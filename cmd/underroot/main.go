@@ -9,7 +9,10 @@ import (
 
 func main() {
 	cfg := ai.Config{
-		UseMock: true,
+		OpenAIBaseURL: "http://localhost:8080/",
+		OpenAIAPIKey:  "None",
+		Model:         "not-needed",
+		UseMock:       false,
 	}
 
 	client, err := ai.NewClient(cfg)

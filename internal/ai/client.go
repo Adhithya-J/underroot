@@ -87,7 +87,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 
 	req, err := http.NewRequest(
 		"POST",
-		c.config.OpenAIBaseURL+"/chat/completions",
+		c.config.OpenAIBaseURL+"v1/chat/completions",
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
