@@ -102,7 +102,8 @@ func (a *Agent) Run(input string) error {
 		fmt.Printf("Explanation: %s\n", resp.Explanation)
 		fmt.Printf("Executing Script....")
 
-		if err = powershell.ExecuteScript(resp.Script); err != nil {
+		psOut, err := powershell.ExecuteScript(resp.Script)
+		if err != nil {
 
 			errMsg := fmt.Sprintf("Execution failed: %s", err)
 
@@ -111,7 +112,7 @@ func (a *Agent) Run(input string) error {
 				errorType: "script execution failed",
 				errorMsg:  errMsg,
 				script:    resp.Script,
-				output:    "",
+				output:    psOut,
 			})
 
 			continue
