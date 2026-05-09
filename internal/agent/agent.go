@@ -40,7 +40,7 @@ func (a *Agent) Run(input string) error {
 
 	var ErrorHistory []AgentError
 
-	currentPrompt := input
+	// currentPrompt := input
 
 	for i := 0; i < maxRetries; i++ {
 
@@ -53,9 +53,9 @@ func (a *Agent) Run(input string) error {
 
 		ErrorHistoryStr := string(jsonOut)
 
-		currentPrompt += ErrorHistoryStr
+		currentPrompt := ErrorHistoryStr + input
 
-		resp, err := a.aiClient.GetShellScript(currentPrompt)
+		resp, body, err := a.aiClient.GetShellScript(currentPrompt)
 
 		if err != nil {
 			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
@@ -63,7 +63,7 @@ func (a *Agent) Run(input string) error {
 
 			ErrorHistory = append(ErrorHistory, AgentError{
 				errorType: "ai generation failure",
-				errorMsg:  errMsg,
+				errorMsg:  errMsg + body,
 				script:    "",
 				output:    "",
 			})

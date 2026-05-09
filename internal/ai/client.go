@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -60,13 +61,13 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
+func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	if c.config.UseMock {
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
 			Explanation: "Mock response",
 			IsSafe:      true,
-		}, nil
+		}, "", nil
 	}
 
 	c.history = append(c.history, Message{
@@ -81,7 +82,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 
 	data, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req, err := http.NewRequest(
@@ -90,7 +91,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
@@ -98,13 +99,13 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("api returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, string(body), fmt.Errorf("api returned %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -116,11 +117,11 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, "", fmt.Errorf("empty response")
 	}
 
 	var agentResp AgentResponse
@@ -129,8 +130,8 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, error) {
 		[]byte(result.Choices[0].Message.Content),
 		&agentResp,
 	); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	return &agentResp, nil
+	return &agentResp, "", nil
 }

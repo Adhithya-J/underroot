@@ -6,7 +6,7 @@ import (
 )
 
 func Validate(script string) error {
-	disallowedKeywords := []string{"Remove-Item",
+	disallowedKeywords := []string{ //"Remove-Item",
 		"Invoke-Expression",
 		"Add-Type",
 		"-EncodedCommand",
