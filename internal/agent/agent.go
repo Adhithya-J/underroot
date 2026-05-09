@@ -43,8 +43,6 @@ func (a *Agent) Run(input string) error {
 
 	var ErrorHistory []AgentError
 
-	// currentPrompt := input
-
 	for i := 0; i < maxRetries; i++ {
 
 		fmt.Printf("\n\x1b[90m--- Attempt %d/%d ---\n\033[0m", i+1, maxRetries)
@@ -149,6 +147,7 @@ func (a *Agent) Run(input string) error {
 				// Feed the error back to the AI for the next iteration
 
 			}
+			fmt.Printf("Output:\n%s\n", psOut)
 			fmt.Println("Success!")
 		} else {
 			fmt.Println("Skipping execution")

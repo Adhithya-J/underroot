@@ -9,6 +9,8 @@ import (
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/powershell"
+
 	"github.com/joho/godotenv"
 )
 
@@ -16,7 +18,7 @@ func main() {
 	godotenv.Load()
 
 	cfg := ai.Config{
-		OpenAIBaseURL: os.Getenv("OpenAIBaseURL"), //"http://localhost:8080/",
+		OpenAIBaseURL: os.Getenv("OpenAIBaseURL"),
 		OpenAIAPIKey:  os.Getenv("OpenAIAPIKey"),
 		OpenAIModel:   os.Getenv("OpenAIModel"),
 		UseMock:       false,
@@ -33,6 +35,12 @@ func main() {
 	fmt.Println("\x1b[90mHit enter or type quit or exit to close the application\033[0m")
 	fmt.Println("--------------------")
 	for {
+		// print cwd and model-name
+		psOut, err := powershell.ExecuteScript("Get-Location | Select-Object -ExpandProperty Path")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("\x1b[90m%s | %s\033[0m\n", psOut, cfg.OpenAIModel)
 		scanner := bufio.NewReader(os.Stdin)
 		fmt.Print("> ")
 		txt, err := scanner.ReadString('\n') //single quotes!

@@ -12,6 +12,5 @@ func ExecuteScript(input string) (string, error) {
 	if err != nil {
 		return string(out), fmt.Errorf("powershell execution failed: %w", err)
 	}
-	fmt.Printf("Output:\n%s\n", out)
 	return string(out), nil
 }
