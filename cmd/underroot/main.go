@@ -24,11 +24,11 @@ func main() {
 		log.Fatalf("OpenAI Client initialization failed: %v", err)
 	}
 	a := agent.NewAgent(client)
-	fmt.Print("--------------------\n")
-	fmt.Print("\tUnderroot\n")
-	fmt.Print("--------------------\n")
-	fmt.Print("\n\n\x1b[90mHit enter or type quit or exit to close the application\033[0m\n")
-	fmt.Print("--------------------\n")
+	fmt.Println("--------------------")
+	fmt.Println("\tUnderroot")
+	fmt.Println("--------------------")
+	fmt.Println("\x1b[90mHit enter or type quit or exit to close the application\033[0m")
+	fmt.Println("--------------------")
 	for {
 		scanner := bufio.NewReader(os.Stdin)
 		fmt.Print("> ")
@@ -47,7 +47,7 @@ func main() {
 		if runErr != nil {
 			log.Fatalf("Agent run failed: %v", runErr)
 		}
-		fmt.Print("--------------------\n")
+		fmt.Println("--------------------")
 
 	}
 

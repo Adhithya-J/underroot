@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/powershell"
@@ -113,27 +116,44 @@ func (a *Agent) Run(input string) error {
 
 		fmt.Printf("Script: \033[32m %s \n\033[0m", resp.Script)
 		fmt.Printf("Explanation: %s\n", resp.Explanation)
-		fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
 
-		psOut, err := powershell.ExecuteScript(resp.Script)
+		scanner := bufio.NewReader(os.Stdin)
+		fmt.Print("\033[34mDo you want to execute the script (Y/n): \033[0m")
+		txt, err := scanner.ReadString('\n') //single quotes!
 		if err != nil {
-
-			errMsg := fmt.Sprintf("Execution failed: %s", err)
-
-			fmt.Printf("\033[31mExecution failed: %v\n\033[0m", errMsg)
-			ErrorHistory = append(ErrorHistory, AgentError{
-				ErrorType: "script execution failed",
-				ErrorMsg:  errMsg,
-				Script:    resp.Script,
-				Output:    psOut,
-			})
-
-			continue
-			// Feed the error back to the AI for the next iteration
-
+			panic(err)
+		}
+		permitted := false
+		txt = strings.TrimSpace(txt)
+		if strings.ToLower(txt) == "y" {
+			permitted = true
 		}
 
-		fmt.Println("Success!")
+		if permitted {
+			fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
+
+			psOut, err := powershell.ExecuteScript(resp.Script)
+			if err != nil {
+
+				errMsg := fmt.Sprintf("Execution failed: %s", err)
+
+				fmt.Printf("\033[31mExecution failed: %v\n\033[0m", errMsg)
+				ErrorHistory = append(ErrorHistory, AgentError{
+					ErrorType: "script execution failed",
+					ErrorMsg:  errMsg,
+					Script:    resp.Script,
+					Output:    psOut,
+				})
+
+				continue
+				// Feed the error back to the AI for the next iteration
+
+			}
+			fmt.Println("Success!")
+		} else {
+			fmt.Println("Skipping execution")
+
+		}
 		return nil
 
 	}
