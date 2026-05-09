@@ -44,7 +44,7 @@ func (a *Agent) Run(input string) error {
 
 	for i := 0; i < maxRetries; i++ {
 
-		fmt.Printf("\n--- Attempt %d/%d ---\n", i+1, maxRetries)
+		fmt.Printf("\n\x1b[90m--- Attempt %d/%d ---\n\033[0m", i+1, maxRetries)
 
 		jsonOut, jsonErr := json.Marshal(ErrorHistory)
 		if jsonErr != nil {
@@ -58,7 +58,7 @@ func (a *Agent) Run(input string) error {
 		resp, body, err := a.aiClient.GetShellScript(currentPrompt)
 
 		if err != nil || resp.Script == "" {
-			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
+			errMsg := fmt.Sprintf("\033[31mAI Generation failed: %v\033[0m\n", err)
 			fmt.Println(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
@@ -71,7 +71,7 @@ func (a *Agent) Run(input string) error {
 		}
 
 		if resp.Script == "" {
-			errMsg := fmt.Sprintf("AI Generation failed: %v\n", err)
+			errMsg := fmt.Sprintf("\033[31mAI Generation failed: %v\033[0m\n", err)
 			fmt.Println(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
@@ -85,7 +85,7 @@ func (a *Agent) Run(input string) error {
 
 		// AI based Safety
 		if !resp.IsSafe {
-			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
+			errMsg := fmt.Sprintf("\033[31mAI marked script unsafe: %s\033[0m", resp.Explanation)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				ErrorType: "AI safety validation failed",
@@ -99,7 +99,7 @@ func (a *Agent) Run(input string) error {
 
 		// Static rule based check
 		if err := validator.Validate(resp.Script); err != nil {
-			errMsg := fmt.Sprintf("Validation failed: %s", err)
+			errMsg := fmt.Sprintf("\033[31mValidation failed: %s\033[0m", err)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				ErrorType: "rule based safety validation failed",
@@ -111,16 +111,16 @@ func (a *Agent) Run(input string) error {
 
 		}
 
-		fmt.Printf("Script: %s\n", resp.Script)
+		fmt.Printf("Script: \033[32m %s \n\033[0m", resp.Script)
 		fmt.Printf("Explanation: %s\n", resp.Explanation)
-		fmt.Printf("Executing Script....")
+		fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
 
 		psOut, err := powershell.ExecuteScript(resp.Script)
 		if err != nil {
 
 			errMsg := fmt.Sprintf("Execution failed: %s", err)
 
-			fmt.Printf("Execution failed: %v\n", errMsg)
+			fmt.Printf("\033[31mExecution failed: %v\n\033[0m", errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				ErrorType: "script execution failed",
 				ErrorMsg:  errMsg,
@@ -138,5 +138,5 @@ func (a *Agent) Run(input string) error {
 
 	}
 
-	return fmt.Errorf("failed after %d attempts", maxRetries)
+	return fmt.Errorf("\033[31mfailed after %d attempts\033[0m", maxRetries)
 }

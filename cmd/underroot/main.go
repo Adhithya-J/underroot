@@ -27,7 +27,7 @@ func main() {
 	fmt.Print("--------------------\n")
 	fmt.Print("\tUnderroot\n")
 	fmt.Print("--------------------\n")
-	fmt.Print("\nHit enter or type quit or exit to close the application\n")
+	fmt.Print("\n\n\x1b[90mHit enter or type quit or exit to close the application\033[0m\n")
 	fmt.Print("--------------------\n")
 	for {
 		scanner := bufio.NewReader(os.Stdin)
