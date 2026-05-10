@@ -81,6 +81,7 @@ func (a *Agent) Run(input string) (*RunResult, error) {
 
 }
 
+
 func (a *Agent) TempRun(input string) {
 	var ErrorHistory []AgentError
 
@@ -156,47 +157,7 @@ func (a *Agent) TempRun(input string) {
 		fmt.Printf("Script: \033[32m %s \n\033[0m", resp.Script)
 		fmt.Printf("Explanation: %s\n", resp.Explanation)
 
-		scanner := bufio.NewReader(os.Stdin)
-		fmt.Print("\033[34mDo you want to execute the script (Y/n): \033[0m")
-		txt, err := scanner.ReadString('\n') //single quotes!
-		if err != nil {
-			panic(err)
-		}
-		permitted := false
-		txt = strings.TrimSpace(txt)
-		if strings.ToLower(txt) == "y" {
-			permitted = true
-		}
-
 		if permitted {
-			fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
-
-			psOut, err := executor.ExecuteScript(resp.Script)
-			if err != nil {
-
-				errMsg := fmt.Sprintf("Execution failed: %s", err)
-
-				fmt.Printf("\033[31mExecution failed: %v\n\033[0m", errMsg)
-				ErrorHistory = append(ErrorHistory, AgentError{
-					ErrorType: "script execution failed",
-					ErrorMsg:  errMsg,
-					Script:    resp.Script,
-					Output:    psOut,
-				})
-
-				continue
-				// Feed the error back to the AI for the next iteration
-
-			}
-			fmt.Printf("Output:\n%s\n", psOut)
-			fmt.Println("Success!")
-		} else {
-			fmt.Println("Skipping execution")
-
-		}
-		return nil
-
-	}
-
+			
 	return fmt.Errorf("\033[31mfailed after %d attempts\033[0m", maxRetries)
 }
