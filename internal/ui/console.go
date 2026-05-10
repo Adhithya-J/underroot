@@ -9,58 +9,60 @@ import (
 const (
 	Gray  = "\033[90m"
 	Reset = "\033[0m"
+	Blue  = "\033[34m"
+	Red   = "\033[31m"
 )
 
 func ReadInput(reader *bufio.Reader) (string, error) {
 	fmt.Print("> ")
-	txt, err := reader.ReadString('\n') //single quotes!
+	txt, err := reader.ReadString('\n') // rune
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 	return strings.TrimSpace(txt), err
 
 }
 
-func AskForApproval(reader *bufio.Reader) bool {
-	fmt.Print("\033[34mDo you want to execute the script (Y/n): \033[0m")
+func AskForApproval(reader *bufio.Reader) (bool, error) {
+	fmt.Printf("%sDo you want to execute the script (Y/n): %s", Blue, Reset)
 	txt, err := reader.ReadString('\n') //single quotes!
 	if err != nil {
-		panic(err)
+		return false, err
 	}
-	permitted := false
 	txt = strings.TrimSpace(txt)
-	if strings.ToLower(txt) == "y" {
-		permitted = true
-	}
-	return permitted
-
+	lowerTxt := strings.ToLower(txt)
+	return lowerTxt == "y" || lowerTxt == "", nil
 }
 
 func PrintBanner() {
 	PrintSeparator()
 	fmt.Println("\tUnderroot")
 	PrintSeparator()
-	fmt.Println(Gray + "Hit enter or type quit or exit to close the application" + Reset)
+	fmt.Printf("%sHit enter or type quit or exit to close the application%s\n", Gray, Reset)
 	PrintSeparator()
 
 }
 
 func PrintSeparator() {
-	fmt.Println(Gray + "--------------------" + Reset)
+	fmt.Printf("%s--------------------%s\n", Gray, Reset)
+}
+
+func PrintRetry(i int, maxRetries int) {
+	fmt.Printf("%s[Retry %d/%d]%s\n", Gray, i+1, maxRetries, Reset)
+}
+
+func PrintError(txt string, err error) {
+	fmt.Printf("%s[Execution Error]%s %s\t %s\n", Red, Reset, err, txt)
+
 }
 
 func PrintPromptBar(cwd string, model string) {
-	fmt.Printf(Gray+"%s | %s\n"+Reset, cwd, model)
+	fmt.Printf("%s%s | %s%s\n", Gray, cwd, model, Reset)
 }
 
 func ShouldExit(input string) bool {
-	result := false
 	txt := strings.TrimSpace(input)
 	lowerTxt := strings.ToLower(txt)
-
-	if lowerTxt == "" || lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit" {
-		result = true
-	}
-	return result
+	return lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit"
 
 }

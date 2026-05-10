@@ -54,51 +54,60 @@ func main() {
 		// print cwd and model-name
 		cwd, err := os.Getwd()
 		if err != nil {
-			log.Printf("failed to get cwd: %v", err)
+			ui.PrintError("Failed to get cwd", err)
 		}
 		ui.PrintPromptBar(cwd, cfg.OpenAIModel)
 
 		txt, err := ui.ReadInput(scanner)
 
 		if err != nil {
-			panic(err)
+			ui.PrintError("User input read failed", err)
+			continue
+		}
+
+		if txt == "" {
+			continue
 		}
 
 		if ui.ShouldExit(txt) {
 			break
 		}
-		var ErrorHistory []AgentError
+
+		var errorHistory []AgentError
 		for i := 0; i < maxRetries; i++ {
-			jsonOut, jsonErr := json.Marshal(ErrorHistory)
+			jsonOut, jsonErr := json.Marshal(errorHistory)
 			if jsonErr != nil {
-				fmt.Println("Error parsing json")
+				ui.PrintError("Error parsing json", jsonErr)
 				continue
 			}
 
-			input := txt + string(jsonOut)
+			input := fmt.Sprintf("User request: %s\nPrevious Errors: %s", txt, string(jsonOut))
 			Response, runErr := a.Run(input)
 			if runErr != nil {
-				log.Printf("Agent run failed: %v", runErr)
-				ErrorHistory = append(ErrorHistory, AgentError{
+				ui.PrintError("Agent run failed", runErr)
+				errorHistory = append(errorHistory, AgentError{
 					ErrorType: "",
-					ErrorMsg:  err.Error(),
+					ErrorMsg:  runErr.Error(),
 					Script:    "",
 					Output:    "",
 				})
 				continue
 			}
 			ui.PrintSeparator()
-			fmt.Print(Response.Script)
-			fmt.Print(Response.Explanation)
+			fmt.Print(Response.Script + "\n")
+			fmt.Print(Response.Explanation + "\n")
 			ui.PrintSeparator()
 
-			permitted := ui.AskForApproval(scanner)
+			permitted, err := ui.AskForApproval(scanner)
+			if err != nil {
+				ui.PrintError("Skipping execution....\nEncountering error", err)
+			}
 			if permitted {
 				fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
 				psOut, err := executor.ExecuteScript(Response.Script)
 				if err != nil {
 					fmt.Println(err)
-					ErrorHistory = append(ErrorHistory, AgentError{
+					errorHistory = append(errorHistory, AgentError{
 						ErrorType: "",
 						ErrorMsg:  err.Error(),
 						Script:    Response.Script,
@@ -108,8 +117,10 @@ func main() {
 				}
 				fmt.Printf("Output:\n%s\n", psOut)
 				fmt.Println("Success!")
+				break
 			} else {
 				fmt.Println("Skipping execution")
+				break
 
 			}
 		}
