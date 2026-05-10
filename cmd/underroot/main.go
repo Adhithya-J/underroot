@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
@@ -16,8 +17,6 @@ import (
 )
 
 const (
-	Gray       = "\033[90m"
-	Reset      = "\033[0m"
 	maxRetries = 3
 )
 
@@ -55,8 +54,11 @@ func main() {
 		cwd, err := os.Getwd()
 		if err != nil {
 			ui.PrintError("Failed to get cwd", err)
+			cwd = "unknown"
 		}
-		ui.PrintPromptBar(cwd, cfg.OpenAIModel)
+		folderName := filepath.Base(cwd)
+		parentPath := filepath.Dir(cwd)
+		ui.PrintPromptBar(parentPath, folderName, cfg.OpenAIModel)
 
 		txt, err := ui.ReadInput(scanner)
 
@@ -75,6 +77,7 @@ func main() {
 
 		var errorHistory []AgentError
 		for i := 0; i < maxRetries; i++ {
+			ui.PrintRetry(i, maxRetries)
 			jsonOut, jsonErr := json.Marshal(errorHistory)
 			if jsonErr != nil {
 				ui.PrintError("Error parsing json", jsonErr)
@@ -82,7 +85,8 @@ func main() {
 			}
 
 			input := fmt.Sprintf("User request: %s\nPrevious Errors: %s", txt, string(jsonOut))
-			Response, runErr := a.Run(input)
+			ui.PrintGray("Generating response...")
+			response, runErr := a.Run(input)
 			if runErr != nil {
 				ui.PrintError("Agent run failed", runErr)
 				errorHistory = append(errorHistory, AgentError{
@@ -93,39 +97,42 @@ func main() {
 				})
 				continue
 			}
-			ui.PrintSeparator()
-			fmt.Print(Response.Script + "\n")
-			fmt.Print(Response.Explanation + "\n")
-			ui.PrintSeparator()
+			ui.PrintLine()
+			ui.PrintScript(response.Script)
+			ui.PrintExplanation(response.Explanation)
+			ui.PrintLine()
 
 			permitted, err := ui.AskForApproval(scanner)
 			if err != nil {
 				ui.PrintError("Skipping execution....\nEncountering error", err)
+				break
 			}
 			if permitted {
-				fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
-				psOut, err := executor.ExecuteScript(Response.Script)
+				ui.PrintGray("Executing Script....")
+				psOut, err := executor.ExecuteScript(response.Script)
 				if err != nil {
-					fmt.Println(err)
+					ui.PrintError("Execution Error", err)
 					errorHistory = append(errorHistory, AgentError{
 						ErrorType: "",
 						ErrorMsg:  err.Error(),
-						Script:    Response.Script,
+						Script:    response.Script,
 						Output:    psOut,
 					})
 					continue
 				}
-				fmt.Printf("Output:\n%s\n", psOut)
+				ui.PrintOutput(psOut)
 				fmt.Println("Success!")
+				ui.PrintLine()
 				break
 			} else {
-				fmt.Println("Skipping execution")
+				ui.PrintGray("Skipping execution")
+				ui.PrintLine()
 				break
 
 			}
 		}
 	}
 
-	ui.PrintSeparator()
+	ui.PrintLine()
 
 }

@@ -7,14 +7,18 @@ import (
 )
 
 const (
-	Gray  = "\033[90m"
 	Reset = "\033[0m"
-	Blue  = "\033[34m"
-	Red   = "\033[31m"
+
+	Gray   = "\033[38;5;245m"
+	Blue   = "\033[38;5;75m"
+	Green  = "\033[38;5;82m"
+	Red    = "\033[38;5;196m"
+	Yellow = "\033[38;5;220m"
+
+	Bold = "\033[1m"
 )
 
 func ReadInput(reader *bufio.Reader) (string, error) {
-	fmt.Print("> ")
 	txt, err := reader.ReadString('\n') // rune
 	if err != nil {
 		return "", err
@@ -35,20 +39,28 @@ func AskForApproval(reader *bufio.Reader) (bool, error) {
 }
 
 func PrintBanner() {
-	PrintSeparator()
-	fmt.Println("\tUnderroot")
-	PrintSeparator()
-	fmt.Printf("%sHit enter or type quit or exit to close the application%s\n", Gray, Reset)
-	PrintSeparator()
+	PrintLine()
+	fmt.Printf("%s%sUNDERROOT%s%s - AI Shell Agent%s\n", Bold, Blue, Reset, Gray, Reset)
+	PrintLine()
+	PrintGray("Hit enter or type quit or exit to close the application")
+	PrintLine()
 
 }
 
-func PrintSeparator() {
-	fmt.Printf("%s--------------------%s\n", Gray, Reset)
+func PrintLine() {
+	fmt.Printf("%s──────────────────────────────────────────────────%s\n", Gray, Reset)
 }
 
 func PrintRetry(i int, maxRetries int) {
 	fmt.Printf("%s[Retry %d/%d]%s\n", Gray, i+1, maxRetries, Reset)
+}
+
+func PrintScript(script string) {
+	fmt.Printf("%s[Script]%s %s\n", Green, Reset, script)
+}
+
+func PrintGray(input string) {
+	fmt.Printf("%s%s%s\n", Gray, input, Reset)
 }
 
 func PrintError(txt string, err error) {
@@ -56,8 +68,26 @@ func PrintError(txt string, err error) {
 
 }
 
-func PrintPromptBar(cwd string, model string) {
-	fmt.Printf("%s%s | %s%s\n", Gray, cwd, model, Reset)
+func PrintExplanation(explanation string) {
+	fmt.Printf("\n%sExplanation: %s%s%s\n", Blue, Gray, explanation, Reset)
+
+}
+
+func PrintOutput(output string) {
+	PrintLine()
+	PrintGray("Output\n")
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		fmt.Printf(" %s\n", line)
+	}
+	PrintLine()
+}
+
+func PrintPromptBar(parent string, folder string, model string) {
+	fmt.Printf("%s%s%s · %s%s%s\n", Blue, folder, Gray, Green, model, Reset)
+	fmt.Printf("%s%s%s\n", Gray, parent, Reset)
+	fmt.Print("❯ ")
+
 }
 
 func ShouldExit(input string) bool {
