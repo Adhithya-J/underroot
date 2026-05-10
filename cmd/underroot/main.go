@@ -8,6 +8,7 @@ import (
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/executor"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
 
 	"github.com/joho/godotenv"
@@ -59,13 +60,33 @@ func main() {
 		}
 
 		input := txt
-		runErr := a.Run(input)
+		Response, runErr := a.Run(input)
 		if runErr != nil {
 			log.Printf("Agent run failed: %v", runErr)
 			continue
 		}
 		ui.PrintSeparator()
+		fmt.Print(Response.Script)
+		fmt.Print(Response.Explanation)
+		ui.PrintSeparator()
+
+		permitted := ui.AskForApproval(scanner)
+		if permitted {
+			fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
+			psOut, err := executor.ExecuteScript(Response.Script)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+			fmt.Printf("Output:\n%s\n", psOut)
+			fmt.Println("Success!")
+		} else {
+			fmt.Println("Skipping execution")
+
+		}
 
 	}
+
+	ui.PrintSeparator()
 
 }

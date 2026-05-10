@@ -21,6 +21,21 @@ func ReadInput(reader *bufio.Reader) (string, error) {
 
 }
 
+func AskForApproval(reader *bufio.Reader) bool {
+	fmt.Print("\033[34mDo you want to execute the script (Y/n): \033[0m")
+	txt, err := reader.ReadString('\n') //single quotes!
+	if err != nil {
+		panic(err)
+	}
+	permitted := false
+	txt = strings.TrimSpace(txt)
+	if strings.ToLower(txt) == "y" {
+		permitted = true
+	}
+	return permitted
+
+}
+
 func PrintBanner() {
 	PrintSeparator()
 	fmt.Println("\tUnderroot")

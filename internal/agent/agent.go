@@ -33,14 +33,55 @@ type AgentError struct {
 	Output    string `json:"output"`
 }
 
+type RunResult struct {
+	Script      string
+	Explanation string
+	Success     bool
+}
+
 func NewAgent(aiClient *ai.Client) *Agent {
 	return &Agent{
 		aiClient: aiClient,
 	}
 }
 
-func (a *Agent) Run(input string) error {
+func (a *Agent) Run(input string) (*RunResult, error) {
 
+	resp, _, err := a.aiClient.GetShellScript(input)
+
+	if err != nil || resp.Script == "" {
+		errMsg := fmt.Errorf("AI Generation failed: %v", err)
+		return nil, errMsg
+	}
+
+	if resp.Script == "" {
+		errMsg := fmt.Errorf("AI Generation failed: %v", err)
+		return nil, errMsg
+
+	}
+
+	// AI based Safety
+	if !resp.IsSafe {
+		errMsg := fmt.Errorf("AI marked script unsafe: %s", resp.Explanation)
+		return nil, errMsg
+
+	}
+
+	// Static rule based check
+	if err := validator.Validate(resp.Script); err != nil {
+		errMsg := fmt.Errorf("Validation failed: %s", err)
+		return nil, errMsg
+	}
+
+	return &RunResult{
+		Script:      resp.Script,
+		Explanation: resp.Explanation,
+		Success:     true,
+	}, nil
+
+}
+
+func (a *Agent) TempRun(input string) {
 	var ErrorHistory []AgentError
 
 	for i := 0; i < maxRetries; i++ {
@@ -59,7 +100,7 @@ func (a *Agent) Run(input string) error {
 		resp, body, err := a.aiClient.GetShellScript(currentPrompt)
 
 		if err != nil || resp.Script == "" {
-			errMsg := fmt.Sprintf("\033[31mAI Generation failed: %v\033[0m\n", err)
+			errMsg := fmt.Sprintf("AI Generation failed: %v", err)
 			fmt.Println(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
@@ -72,7 +113,7 @@ func (a *Agent) Run(input string) error {
 		}
 
 		if resp.Script == "" {
-			errMsg := fmt.Sprintf("\033[31mAI Generation failed: %v\033[0m\n", err)
+			errMsg := fmt.Sprintf("AI Generation failed: %v", err)
 			fmt.Println(errMsg)
 
 			ErrorHistory = append(ErrorHistory, AgentError{
@@ -86,7 +127,7 @@ func (a *Agent) Run(input string) error {
 
 		// AI based Safety
 		if !resp.IsSafe {
-			errMsg := fmt.Sprintf("\033[31mAI marked script unsafe: %s\033[0m", resp.Explanation)
+			errMsg := fmt.Sprintf("AI marked script unsafe: %s", resp.Explanation)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				ErrorType: "AI safety validation failed",
@@ -100,7 +141,7 @@ func (a *Agent) Run(input string) error {
 
 		// Static rule based check
 		if err := validator.Validate(resp.Script); err != nil {
-			errMsg := fmt.Sprintf("\033[31mValidation failed: %s\033[0m", err)
+			errMsg := fmt.Sprintf("Validation failed: %s", err)
 			fmt.Println(errMsg)
 			ErrorHistory = append(ErrorHistory, AgentError{
 				ErrorType: "rule based safety validation failed",
