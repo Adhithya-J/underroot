@@ -9,13 +9,20 @@ import (
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
-	"github.com/Adhithya-J/underroot.git/internal/powershell"
 
 	"github.com/joho/godotenv"
 )
 
+const (
+	Gray  = "\033[90m"
+	Reset = "\033[0m"
+)
+
 func main() {
-	godotenv.Load()
+
+	if err := godotenv.Load(); err != nil {
+		fmt.Println(".env file not found")
+	}
 
 	cfg := ai.Config{
 		OpenAIBaseURL: os.Getenv("OpenAIBaseURL"),
@@ -29,37 +36,75 @@ func main() {
 		log.Fatalf("OpenAI Client initialization failed: %v", err)
 	}
 	a := agent.NewAgent(client)
-	fmt.Println("--------------------")
-	fmt.Println("\tUnderroot")
-	fmt.Println("--------------------")
-	fmt.Println("\x1b[90mHit enter or type quit or exit to close the application\033[0m")
-	fmt.Println("--------------------")
+	scanner := bufio.NewReader(os.Stdin)
+
+	printBanner()
+
 	for {
 		// print cwd and model-name
-		psOut, err := powershell.ExecuteScript("Get-Location | Select-Object -ExpandProperty Path")
+		cwd, err := os.Getwd()
 		if err != nil {
-			panic(err)
+			log.Printf("failed to get cwd: %v", err)
 		}
-		fmt.Printf("\x1b[90m%s | %s\033[0m\n", psOut, cfg.OpenAIModel)
-		scanner := bufio.NewReader(os.Stdin)
-		fmt.Print("> ")
-		txt, err := scanner.ReadString('\n') //single quotes!
-		if err != nil {
-			panic(err)
-		}
-		txt = strings.TrimSpace(txt)
-		lowerTxt := strings.ToLower(txt)
+		printPromptBar(cwd, cfg.OpenAIModel)
 
-		if lowerTxt == "" || lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit" {
+		txt, err := readInput(scanner)
+
+		if err != nil {
+			panic(err)
+		}
+
+		if shouldExit(txt) {
 			break
 		}
+
 		input := txt
 		runErr := a.Run(input)
 		if runErr != nil {
-			log.Fatalf("Agent run failed: %v", runErr)
+			log.Printf("Agent run failed: %v", runErr)
+			continue
 		}
-		fmt.Println("--------------------")
+		printSeparator()
 
 	}
+
+}
+
+func readInput(reader *bufio.Reader) (string, error) {
+	fmt.Print("> ")
+	txt, err := reader.ReadString('\n') //single quotes!
+	if err != nil {
+		panic(err)
+	}
+	return strings.TrimSpace(txt), err
+
+}
+
+func printBanner() {
+	printSeparator()
+	fmt.Println("\tUnderroot")
+	printSeparator()
+	fmt.Println(Gray + "Hit enter or type quit or exit to close the application" + Reset)
+	printSeparator()
+
+}
+
+func printSeparator() {
+	fmt.Println(Gray + "--------------------" + Reset)
+}
+
+func printPromptBar(cwd string, model string) {
+	fmt.Printf(Gray+"%s | %s\n"+Reset, cwd, model)
+}
+
+func shouldExit(input string) bool {
+	result := false
+	txt := strings.TrimSpace(input)
+	lowerTxt := strings.ToLower(txt)
+
+	if lowerTxt == "" || lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit" {
+		result = true
+	}
+	return result
 
 }
