@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
-	"github.com/Adhithya-J/underroot.git/internal/powershell"
+	"github.com/Adhithya-J/underroot.git/internal/executor"
 	"github.com/Adhithya-J/underroot.git/internal/validator"
 )
 
@@ -130,7 +130,7 @@ func (a *Agent) Run(input string) error {
 		if permitted {
 			fmt.Printf("\x1b[90m Executing Script....\033[0m\n")
 
-			psOut, err := powershell.ExecuteScript(resp.Script)
+			psOut, err := executor.ExecuteScript(resp.Script)
 			if err != nil {
 
 				errMsg := fmt.Sprintf("Execution failed: %s", err)

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/ui"
 
 	"github.com/joho/godotenv"
 )
@@ -38,7 +38,7 @@ func main() {
 	a := agent.NewAgent(client)
 	scanner := bufio.NewReader(os.Stdin)
 
-	printBanner()
+	ui.PrintBanner()
 
 	for {
 		// print cwd and model-name
@@ -46,15 +46,15 @@ func main() {
 		if err != nil {
 			log.Printf("failed to get cwd: %v", err)
 		}
-		printPromptBar(cwd, cfg.OpenAIModel)
+		ui.PrintPromptBar(cwd, cfg.OpenAIModel)
 
-		txt, err := readInput(scanner)
+		txt, err := ui.ReadInput(scanner)
 
 		if err != nil {
 			panic(err)
 		}
 
-		if shouldExit(txt) {
+		if ui.ShouldExit(txt) {
 			break
 		}
 
@@ -64,47 +64,8 @@ func main() {
 			log.Printf("Agent run failed: %v", runErr)
 			continue
 		}
-		printSeparator()
+		ui.PrintSeparator()
 
 	}
-
-}
-
-func readInput(reader *bufio.Reader) (string, error) {
-	fmt.Print("> ")
-	txt, err := reader.ReadString('\n') //single quotes!
-	if err != nil {
-		panic(err)
-	}
-	return strings.TrimSpace(txt), err
-
-}
-
-func printBanner() {
-	printSeparator()
-	fmt.Println("\tUnderroot")
-	printSeparator()
-	fmt.Println(Gray + "Hit enter or type quit or exit to close the application" + Reset)
-	printSeparator()
-
-}
-
-func printSeparator() {
-	fmt.Println(Gray + "--------------------" + Reset)
-}
-
-func printPromptBar(cwd string, model string) {
-	fmt.Printf(Gray+"%s | %s\n"+Reset, cwd, model)
-}
-
-func shouldExit(input string) bool {
-	result := false
-	txt := strings.TrimSpace(input)
-	lowerTxt := strings.ToLower(txt)
-
-	if lowerTxt == "" || lowerTxt == "q" || lowerTxt == "quit" || lowerTxt == "exit" {
-		result = true
-	}
-	return result
 
 }

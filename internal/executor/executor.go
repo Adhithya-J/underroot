@@ -1,4 +1,4 @@
-package powershell
+package executor
 
 import (
 	"fmt"
