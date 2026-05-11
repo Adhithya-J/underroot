@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -27,7 +29,7 @@ type AgentResponse struct {
 type Config struct {
 	OpenAIAPIKey  string
 	OpenAIBaseURL string
-	Model         string
+	OpenAIModel   string
 	UseMock       bool
 }
 
@@ -37,7 +39,21 @@ type Client struct {
 	history    []Message
 }
 
-func NewClient(cfg Config) *Client {
+func NewClient(cfg Config) (*Client, error) {
+	if !cfg.UseMock {
+		if cfg.OpenAIAPIKey == "" {
+			return nil, errors.New("Missing OpenAI API Key")
+		}
+
+		if cfg.OpenAIBaseURL == "" {
+			return nil, errors.New("Missing OpenAI Base URL")
+		}
+
+		if cfg.OpenAIModel == "" {
+			return nil, errors.New("Missing OpenAI Model")
+		}
+
+	}
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
@@ -46,19 +62,23 @@ func NewClient(cfg Config) *Client {
 		history: []Message{
 			{
 				Role:    "system",
-				Content: "You are a senior engineer and security expert. Your task is to generate bash scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema.",
+				Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema with keys as script, explanation, and is_safe",
 			},
 		},
-	}
+	}, nil
 }
 
+<<<<<<< HEAD
+func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
+=======
 func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentResponse, error) {
+>>>>>>> main
 	if c.config.UseMock {
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
 			Explanation: "Mock response",
 			IsSafe:      true,
-		}, nil
+		}, "", nil
 	}
 
 	c.history = append(c.history, Message{
@@ -67,15 +87,20 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 	})
 
 	body := map[string]interface{}{
-		"model":    c.config.Model,
+		"model":    c.config.OpenAIModel,
 		"messages": c.history,
 	}
 
 	data, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
+<<<<<<< HEAD
+	req, err := http.NewRequest(
+		"POST",
+		c.config.OpenAIBaseURL+"v1/chat/completions",
+=======
 	endpoint, err := url.JoinPath(
 		c.config.OpenAIBaseURL,
 		"chat/completions",
@@ -88,10 +113,11 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		ctx,
 		http.MethodPost,
 		endpoint,
+>>>>>>> main
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
@@ -99,12 +125,13 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return nil, string(body), fmt.Errorf("api returned %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -116,11 +143,11 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, "", fmt.Errorf("empty response")
 	}
 
 	c.history = append(c.history, Message{
@@ -134,11 +161,15 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		[]byte(result.Choices[0].Message.Content),
 		&agentResp,
 	); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
+<<<<<<< HEAD
+	return &agentResp, "", nil
+=======
 	// fmt.Print("\n\nHistory:\n")
 	// fmt.Println(c.history)
 	// fmt.Print("\nHistory:\n")
 	return &agentResp, nil
+>>>>>>> main
 }
