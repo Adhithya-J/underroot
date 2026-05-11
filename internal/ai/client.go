@@ -2,11 +2,14 @@ package ai
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"time"
 )
 
 // Message represents a single turn in the AI conversation history.
@@ -31,8 +34,9 @@ type Config struct {
 }
 
 type Client struct {
-	config  Config
-	history []Message
+	config     Config
+	httpClient *http.Client
+	history    []Message
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -52,6 +56,9 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	return &Client{
 		config: cfg,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 		history: []Message{
 			{
 				Role:    "system",
@@ -61,7 +68,11 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+<<<<<<< HEAD
 func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
+=======
+func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentResponse, error) {
+>>>>>>> main
 	if c.config.UseMock {
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
@@ -85,9 +96,24 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		return nil, "", err
 	}
 
+<<<<<<< HEAD
 	req, err := http.NewRequest(
 		"POST",
 		c.config.OpenAIBaseURL+"v1/chat/completions",
+=======
+	endpoint, err := url.JoinPath(
+		c.config.OpenAIBaseURL,
+		"chat/completions",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+>>>>>>> main
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
@@ -97,7 +123,7 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -124,6 +150,11 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		return nil, "", fmt.Errorf("empty response")
 	}
 
+	c.history = append(c.history, Message{
+		Role:    "assistant",
+		Content: result.Choices[0].Message.Content,
+	})
+
 	var agentResp AgentResponse
 
 	if err := json.Unmarshal(
@@ -133,5 +164,12 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		return nil, "", err
 	}
 
+<<<<<<< HEAD
 	return &agentResp, "", nil
+=======
+	// fmt.Print("\n\nHistory:\n")
+	// fmt.Println(c.history)
+	// fmt.Print("\nHistory:\n")
+	return &agentResp, nil
+>>>>>>> main
 }
