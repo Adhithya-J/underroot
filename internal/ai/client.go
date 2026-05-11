@@ -68,11 +68,7 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-<<<<<<< HEAD
 func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
-=======
-func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentResponse, error) {
->>>>>>> main
 	if c.config.UseMock {
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
@@ -96,24 +92,18 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		return nil, "", err
 	}
 
-<<<<<<< HEAD
-	req, err := http.NewRequest(
-		"POST",
-		c.config.OpenAIBaseURL+"v1/chat/completions",
-=======
 	endpoint, err := url.JoinPath(
 		c.config.OpenAIBaseURL,
 		"chat/completions",
 	)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req, err := http.NewRequestWithContext(
-		ctx,
+		context.Background(),
 		http.MethodPost,
 		endpoint,
->>>>>>> main
 		bytes.NewBuffer(data),
 	)
 	if err != nil {
@@ -164,12 +154,5 @@ func (c *Client) GetShellScript(ctx context.Context, input string) (*AgentRespon
 		return nil, "", err
 	}
 
-<<<<<<< HEAD
 	return &agentResp, "", nil
-=======
-	// fmt.Print("\n\nHistory:\n")
-	// fmt.Println(c.history)
-	// fmt.Print("\nHistory:\n")
-	return &agentResp, nil
->>>>>>> main
 }
