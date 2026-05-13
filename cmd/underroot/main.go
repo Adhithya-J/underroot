@@ -28,6 +28,37 @@ type AgentError struct {
 }
 
 // Introduce session state
+type Session struct {
+	Model        string
+	FolderName   string
+	ParentDir    string
+	CurrentInput string
+
+	LastScript       string
+	LastExplaination string
+	LastOutput       string
+
+	RetryCount int
+}
+
+// to be used later
+type App struct {
+	Session *Session
+	Agent   *agent.Agent
+}
+
+func UpdateWorkingDir(session *Session) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		// ui.PrintError("Failed to get cwd", err)
+		session.FolderName = "unknown"
+		session.ParentDir = "unknown"
+		return
+	}
+	session.FolderName = filepath.Base(cwd)
+	session.ParentDir = filepath.Dir(cwd)
+
+}
 
 func main() {
 
@@ -47,20 +78,18 @@ func main() {
 		log.Fatalf("OpenAI Client initialization failed: %v", err)
 	}
 	a := agent.NewAgent(client)
+
 	scanner := bufio.NewReader(os.Stdin)
+	session := &Session{
+		Model: cfg.OpenAIModel,
+	}
 
 	ui.PrintBanner()
 
 	for {
 		// print cwd and model-name
-		cwd, err := os.Getwd()
-		if err != nil {
-			ui.PrintError("Failed to get cwd", err)
-			cwd = "unknown"
-		}
-		folderName := filepath.Base(cwd)
-		parentPath := filepath.Dir(cwd)
-		ui.PrintPromptBar(parentPath, folderName, cfg.OpenAIModel)
+		UpdateWorkingDir(session)
+		ui.PrintPromptBar(session.ParentDir, session.FolderName, session.Model)
 
 		txt, err := ui.ReadInput(scanner)
 
@@ -79,7 +108,8 @@ func main() {
 
 		var errorHistory []AgentError
 		for i := 0; i < maxRetries; i++ {
-			ui.PrintRetry(i, maxRetries)
+			session.RetryCount = i
+			ui.PrintRetry(session.RetryCount, maxRetries)
 			jsonOut, jsonErr := json.Marshal(errorHistory)
 			if jsonErr != nil {
 				ui.PrintError("Error parsing json", jsonErr)
@@ -100,8 +130,10 @@ func main() {
 				continue
 			}
 			ui.PrintLine()
-			ui.PrintScript(response.Script)
-			ui.PrintExplanation(response.Explanation)
+			session.LastScript = response.Script
+			session.LastExplaination = response.Explanation
+			ui.PrintScript(session.LastScript)
+			ui.PrintExplanation(session.LastExplaination)
 			ui.PrintLine()
 
 			permitted, err := ui.AskForApproval(scanner)
@@ -122,7 +154,8 @@ func main() {
 					})
 					continue
 				}
-				ui.PrintOutput(psOut)
+				// session.LastOutput = psOut
+				ui.PrintOutput(session.LastOutput)
 				fmt.Println("Success!")
 				ui.PrintLine()
 				break
