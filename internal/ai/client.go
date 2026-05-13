@@ -83,7 +83,57 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 
 func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
 	// to be implemented
+
 	return "", nil
+}
+
+func (c *Client) SetupConvoHistory(input string) (map[string]interface{}, error) {
+	c.history = append(c.history, Message{
+		Role:    "user",
+		Content: input,
+	})
+
+	body := map[string]interface{}{
+		"model":    c.config.OpenAIModel,
+		"messages": c.history,
+	}
+
+	return body, nil
+}
+
+func (c *Client) MakeHTTPRequest(body map[string]interface{}) (*http.Response, error) {
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint, err := url.JoinPath(
+		c.config.OpenAIBaseURL,
+		"chat/completions",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Setting up request
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		endpoint,
+		bytes.NewBuffer(data),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Making HTTP Request
+	resp, err := c.httpClient.Do(req)
+	return resp, err
+
 }
 
 func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
@@ -95,43 +145,12 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		}, "", nil
 	}
 
-	c.history = append(c.history, Message{
-		Role:    "user",
-		Content: input,
-	})
-
-	body := map[string]interface{}{
-		"model":    c.config.OpenAIModel,
-		"messages": c.history,
-	}
-
-	data, err := json.Marshal(body)
+	body, err := c.SetupConvoHistory(input) //json.Marshal(body)
 	if err != nil {
 		return nil, "", err
 	}
 
-	endpoint, err := url.JoinPath(
-		c.config.OpenAIBaseURL,
-		"chat/completions",
-	)
-	if err != nil {
-		return nil, "", err
-	}
-
-	req, err := http.NewRequestWithContext(
-		context.Background(),
-		http.MethodPost,
-		endpoint,
-		bytes.NewBuffer(data),
-	)
-	if err != nil {
-		return nil, "", err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.MakeHTTPRequest(body)
 	if err != nil {
 		return nil, "", err
 	}
