@@ -39,6 +39,8 @@ type Client struct {
 	history    []Message
 }
 
+// think in terms of separation of concerns. each function should care about what it wants to do not about history of previous function calls
+
 func NewClient(cfg Config) (*Client, error) {
 	if !cfg.UseMock {
 		if cfg.OpenAIAPIKey == "" {

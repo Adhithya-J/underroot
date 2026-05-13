@@ -27,6 +27,8 @@ type AgentError struct {
 	Output    string `json:"output"`
 }
 
+// Introduce session state
+
 func main() {
 
 	if err := godotenv.Load(); err != nil {
