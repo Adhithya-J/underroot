@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"fmt"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 const (
@@ -17,6 +19,14 @@ const (
 
 	Bold = "\033[1m"
 )
+
+func terminalWidth() int {
+	w, _, err := term.GetSize(0)
+	if err != nil {
+		return 50
+	}
+	return w
+}
 
 func ReadInput(reader *bufio.Reader) (string, error) {
 	txt, err := reader.ReadString('\n') // rune
@@ -42,13 +52,15 @@ func PrintBanner() {
 	PrintLine()
 	fmt.Printf("%s%sUNDERROOT%s%s - AI Shell Agent%s\n", Bold, Blue, Reset, Gray, Reset)
 	PrintLine()
-	PrintGray("Hit enter or type quit or exit to close the application")
+	PrintGray("Press Enter to continue")
+	PrintGray("Type 'exit' or 'quit' to close")
 	PrintLine()
 
 }
 
 func PrintLine() {
-	fmt.Printf("%s──────────────────────────────────────────────────%s\n", Gray, Reset)
+	width := terminalWidth()
+	fmt.Printf("%s%s%s\n", Gray, strings.Repeat("─", width-2), Reset)
 }
 
 func PrintRetry(i int, maxRetries int) {
@@ -74,18 +86,31 @@ func PrintExplanation(explanation string) {
 }
 
 func PrintOutput(output string) {
-	PrintLine()
-	PrintGray("Output\n")
+
+	maxWidth := 0
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		fmt.Printf(" %s\n", line)
+		if len(line) > maxWidth {
+			maxWidth = len(line)
+		}
 	}
+	boder := max(maxWidth+2, terminalWidth())
+
 	PrintLine()
+	PrintGray("Output")
+
+	fmt.Printf("%s┌%s┐%s\n", Blue, strings.Repeat("─", boder), Reset)
+
+	for _, line := range lines {
+		fmt.Printf("%s│%s %s %s│%s\n", Blue, Reset, line, Blue, Reset)
+	}
+	fmt.Printf("%s└%s┘%s\n", Blue, strings.Repeat("─", boder), Reset)
 }
 
 func PrintPromptBar(parent string, folder string, model string) {
 	fmt.Printf("%s%s%s · %s%s%s\n", Blue, folder, Gray, Green, model, Reset)
 	fmt.Printf("%s%s%s\n", Gray, parent, Reset)
+	PrintLine()
 	fmt.Print("❯ ")
 
 }
