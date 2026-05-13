@@ -68,6 +68,24 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
+func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+	var agentResp AgentResponse
+
+	if err := json.Unmarshal(
+		[]byte(input),
+		&agentResp,
+	); err != nil {
+		return nil, err
+	}
+	return &agentResp, nil
+
+}
+
+func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
+	// to be implemented
+	return "", nil
+}
+
 func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	if c.config.UseMock {
 		return &AgentResponse{
@@ -145,14 +163,6 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		Content: result.Choices[0].Message.Content,
 	})
 
-	var agentResp AgentResponse
-
-	if err := json.Unmarshal(
-		[]byte(result.Choices[0].Message.Content),
-		&agentResp,
-	); err != nil {
-		return nil, "", err
-	}
-
-	return &agentResp, "", nil
+	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
+	return output, "", nil
 }
