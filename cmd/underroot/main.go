@@ -27,6 +27,13 @@ type AgentError struct {
 	Output    string `json:"output"`
 }
 
+type Interaction struct {
+	UserInput   string `json:"user_input"`
+	Explanation string `json:"explanation"`
+	Script      string `json:"script"`
+	Output      string `json:"output"`
+}
+
 // Introduce session state
 type Session struct {
 	Model        string
@@ -34,17 +41,24 @@ type Session struct {
 	ParentDir    string
 	CurrentInput string
 
-	LastScript       string
-	LastExplaination string
-	LastOutput       string
+	LastScript      string
+	LastExplanation string
+	LastOutput      string
 
 	RetryCount int
+
+	History []Interaction
 }
 
 // to be used later
 type App struct {
 	Session *Session
 	Agent   *agent.Agent
+}
+
+func (s *Session) AddInteraction(interaction Interaction) {
+	s.History = append(s.History, interaction)
+
 }
 
 func UpdateWorkingDir(session *Session) {
@@ -58,6 +72,14 @@ func UpdateWorkingDir(session *Session) {
 	session.FolderName = filepath.Base(cwd)
 	session.ParentDir = filepath.Dir(cwd)
 
+}
+
+func BuildPrompt(txt string, errors []AgentError) (string, error) {
+	jsonOut, jsonErr := json.Marshal(errors)
+	if jsonErr != nil {
+		jsonOut = nil
+	}
+	return fmt.Sprintf("User request: %s\nPrevious Errors: %s", txt, string(jsonOut)), jsonErr
 }
 
 func main() {
@@ -110,13 +132,11 @@ func main() {
 		for i := 0; i < maxRetries; i++ {
 			session.RetryCount = i
 			ui.PrintRetry(session.RetryCount, maxRetries)
-			jsonOut, jsonErr := json.Marshal(errorHistory)
-			if jsonErr != nil {
-				ui.PrintError("Error parsing json", jsonErr)
-				continue
-			}
 
-			input := fmt.Sprintf("User request: %s\nPrevious Errors: %s", txt, string(jsonOut))
+			input, err := BuildPrompt(txt, errorHistory)
+			if err != nil {
+				ui.PrintError("Error parsing json", err)
+			}
 			ui.PrintGray("Generating response...")
 			response, runErr := a.Run(input)
 			if runErr != nil {
@@ -131,9 +151,9 @@ func main() {
 			}
 			ui.PrintLine()
 			session.LastScript = response.Script
-			session.LastExplaination = response.Explanation
+			session.LastExplanation = response.Explanation
 			ui.PrintScript(session.LastScript)
-			ui.PrintExplanation(session.LastExplaination)
+			ui.PrintExplanation(session.LastExplanation)
 			ui.PrintLine()
 
 			permitted, err := ui.AskForApproval(scanner)
@@ -154,10 +174,21 @@ func main() {
 					})
 					continue
 				}
-				// session.LastOutput = psOut
+				session.LastOutput = psOut
+
+				interaction := Interaction{
+					UserInput:   txt,
+					Explanation: response.Explanation,
+					Script:      response.Script,
+					Output:      psOut,
+				}
+				session.AddInteraction(interaction)
+
 				ui.PrintOutput(session.LastOutput)
 				fmt.Println("Success!")
+				fmt.Printf("History size: %d\n", len(session.History))
 				ui.PrintLine()
+
 				break
 			} else {
 				ui.PrintGray("Skipping execution")
