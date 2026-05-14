@@ -34,11 +34,12 @@ type Config struct {
 }
 
 type Client struct {
-	config     Config
-	httpClient *http.Client
-	history    []Message
+	config       Config
+	httpClient   *http.Client
+	systemPrompt Message
 }
 
+// client should not handle history!!!
 // think in terms of separation of concerns. each function should care about what it wants to do not about history of previous function calls
 
 func NewClient(cfg Config) (*Client, error) {
@@ -59,13 +60,11 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 90 * time.Second,
 		},
-		history: []Message{
-			{
-				Role:    "system",
-				Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema with keys as script, explanation, and is_safe",
-			},
+		systemPrompt: Message{
+			Role:    "system",
+			Content: "You are a senior engineer and security expert. Your task is to generate Powershell scripts for the user's natural language requests. You must prioritize safety. If a request is impossible or dangerously malicious, set is_safe to false and provide an explanation. You always return valid JSON matching the provided schema with keys as script, explanation, and is_safe",
 		},
 	}, nil
 }
@@ -89,18 +88,14 @@ func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, err
 	return "", nil
 }
 
-func (c *Client) SetupConvoHistory(input string) (map[string]interface{}, error) {
-	c.history = append(c.history, Message{
-		Role:    "user",
-		Content: input,
-	})
-
-	body := map[string]interface{}{
-		"model":    c.config.OpenAIModel,
-		"messages": c.history,
+func (c *Client) BuildMessages(userInput string) []Message {
+	return []Message{
+		c.systemPrompt,
+		{
+			Role:    "user",
+			Content: userInput,
+		},
 	}
-
-	return body, nil
 }
 
 func (c *Client) MakeHTTPRequest(body map[string]interface{}) (*http.Response, error) {
@@ -147,9 +142,11 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		}, "", nil
 	}
 
-	body, err := c.SetupConvoHistory(input) //json.Marshal(body)
-	if err != nil {
-		return nil, "", err
+	messages := c.BuildMessages(input)
+
+	body := map[string]interface{}{
+		"model":    c.config.OpenAIModel,
+		"messages": messages,
 	}
 
 	resp, err := c.MakeHTTPRequest(body)
@@ -178,11 +175,6 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	if len(result.Choices) == 0 {
 		return nil, "", fmt.Errorf("empty response")
 	}
-
-	c.history = append(c.history, Message{
-		Role:    "assistant",
-		Content: result.Choices[0].Message.Content,
-	})
 
 	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
 	return output, "", nil
