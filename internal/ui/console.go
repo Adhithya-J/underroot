@@ -107,9 +107,9 @@ func PrintOutput(output string) {
 	fmt.Printf("%s└%s┘%s\n", Blue, strings.Repeat("─", boder), Reset)
 }
 
-func PrintPromptBar(parent string, folder string, model string) {
+func PrintPromptBar(parent string, folder string, model string, tokens int) {
 	fmt.Printf("%s%s%s · %s%s%s\n", Blue, folder, Gray, Green, model, Reset)
-	fmt.Printf("%s%s%s\n", Gray, parent, Reset)
+	fmt.Printf("%s%s · %d/4096 tokens%s\n", Gray, parent, tokens, Reset)
 	PrintLine()
 	fmt.Print("❯ ")
 

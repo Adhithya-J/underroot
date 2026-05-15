@@ -20,7 +20,7 @@ func main() {
 	for {
 		// print cwd and model-name
 		UpdateWorkingDir(app.Session)
-		ui.PrintPromptBar(app.Session.ParentDir, app.Session.FolderName, app.Session.Model)
+		ui.PrintPromptBar(app.Session.ParentDir, app.Session.FolderName, app.Session.Model, app.Session.TotalTokens())
 
 		txt, err := ui.ReadInput(app.Scanner)
 		app.Session.ErrorHistory = nil
