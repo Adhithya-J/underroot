@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
@@ -91,7 +92,7 @@ func UpdateWorkingDir(session *Session) {
 }
 
 func EstimateTokens(txt string) int {
-	return len(txt) / 4
+	return utf8.RuneCountInString(txt) / 4
 }
 
 func (s *Session) TotalTokens() int {
@@ -104,11 +105,16 @@ func (s *Session) TotalTokens() int {
 }
 
 func BuildPrompt(session *Session) (string, error) {
-	jsonOut, jsonErr := json.Marshal(session.ErrorHistory)
-	if jsonErr != nil {
-		jsonOut = nil
+	jsonHOut, jsonHErr := json.Marshal(session.History)
+	if jsonHErr != nil {
+		jsonHOut = nil
 	}
-	return fmt.Sprintf("User request: %s\nPrevious Errors: %s", session.CurrentInput, string(jsonOut)), jsonErr
+
+	jsonEHOut, jsonEHErr := json.Marshal(session.ErrorHistory)
+	if jsonEHErr != nil {
+		jsonEHOut = nil
+	}
+	return fmt.Sprintf("User request: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, string(jsonEHOut), string(jsonHOut)), jsonEHErr
 }
 
 func GetClient() *ai.Client {

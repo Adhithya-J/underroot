@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -87,24 +88,51 @@ func PrintExplanation(explanation string) {
 
 func PrintOutput(output string) {
 
+	termW := terminalWidth()
+
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+
 	maxWidth := 0
-	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		if len(line) > maxWidth {
-			maxWidth = len(line)
+		if len(line) == 0 {
+			continue
+		}
+		w := utf8.RuneCountInString(line)
+		if w > maxWidth {
+			maxWidth = w
 		}
 	}
-	boder := max(maxWidth+2, terminalWidth())
+
+	contentWidth := maxWidth + 2
+	if termW > contentWidth {
+		contentWidth = maxWidth - 2
+	}
+	// borderWidth := max(termW-2, maxWidth+2)
+
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
 
 	PrintLine()
 	PrintGray("Output")
 
-	fmt.Printf("%s┌%s┐%s\n", Blue, strings.Repeat("─", boder), Reset)
+	border := strings.Repeat("─", contentWidth)
+	fmt.Printf("%s┌%s┐%s\n", Blue, border, Reset)
 
 	for _, line := range lines {
-		fmt.Printf("%s│%s %s %s│%s\n", Blue, Reset, line, Blue, Reset)
+		lineWidth := utf8.RuneCountInString(line)
+		padding := contentWidth - lineWidth - 1
+
+		if padding < 0 {
+			padding = 0
+		}
+
+		fmt.Printf("%s│%s %s%s%s│%s\n", Blue, Reset, line, strings.Repeat(" ", padding), Blue, Reset)
 	}
-	fmt.Printf("%s└%s┘%s\n", Blue, strings.Repeat("─", boder), Reset)
+	fmt.Printf("%s└%s┘%s\n", Blue, border, Reset)
 }
 
 func PrintPromptBar(parent string, folder string, model string, tokens int) {
