@@ -42,6 +42,9 @@ type Session struct {
 
 	ErrorHistory []AgentError
 	History      []Interaction
+
+	// you might also want to manage session level execution permission within the this
+	// apart from a global execution permissions
 }
 
 // to be used later
@@ -84,6 +87,19 @@ func UpdateWorkingDir(session *Session) {
 	}
 	session.FolderName = filepath.Base(cwd)
 	session.ParentDir = filepath.Dir(cwd)
+
+}
+
+func EstimateTokens(txt string) int {
+	return len(txt) / 4
+}
+
+func (s *Session) TotalTokens() int {
+	total := EstimateTokens(s.CurrentInput)
+	for _, item := range s.History {
+		total += EstimateTokens(item.UserInput + item.Script + item.Explanation + item.Output)
+	}
+	return total
 
 }
 
