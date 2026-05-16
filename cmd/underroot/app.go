@@ -26,6 +26,8 @@ type Interaction struct {
 	Explanation string `json:"explanation"`
 	Script      string `json:"script"`
 	Output      string `json:"output"`
+	// this should also have a flag to identify requests that have failed after 'n' attempts
+	// if it failed, summary of the 'n' attempts should be added for better context!
 }
 
 // Introduce session state
@@ -105,16 +107,58 @@ func (s *Session) TotalTokens() int {
 }
 
 func BuildPrompt(session *Session) (string, error) {
+	// convo history should not include explaination when being fed into prompt
 	jsonHOut, jsonHErr := json.Marshal(session.History)
 	if jsonHErr != nil {
 		jsonHOut = nil
 	}
 
-	jsonEHOut, jsonEHErr := json.Marshal(session.ErrorHistory)
-	if jsonEHErr != nil {
-		jsonEHOut = nil
+	n := len(session.ErrorHistory)
+
+	// add gating so json parsing does not fail
+	var (
+		jsonCEOut []byte = nil
+		jsonCEErr error
+		jsonEHOut []byte = nil
+		jsonEHErr error
+	)
+
+	// current error is last error in error history
+	if n > 0 {
+		currentError := session.ErrorHistory[n-1]
+		jsonCEOut, jsonCEErr = json.Marshal(currentError)
+		if jsonCEErr != nil {
+			jsonCEOut = nil
+		}
 	}
-	return fmt.Sprintf("User request: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, string(jsonEHOut), string(jsonHOut)), jsonEHErr
+
+	// add gating so json parsing does not fail
+	if n > 1 {
+		jsonEHOut, jsonEHErr = json.Marshal(session.ErrorHistory[:n-1])
+		if jsonEHErr != nil {
+			jsonEHOut = nil
+		}
+	}
+
+	// iterate though the jsonEHOut and keep the latest error and mark it as current error
+	// inject appropriate error fixing strategy based on error type for that
+	// the rest of the errors (if present) can be added as it is
+
+	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, string(jsonCEOut), string(jsonEHOut), string(jsonHOut))
+
+	if jsonHErr != nil {
+		return prompt, jsonHErr
+	}
+
+	if jsonCEErr != nil {
+		return prompt, jsonCEErr
+	}
+
+	if jsonEHErr != nil {
+		return prompt, jsonEHErr
+	}
+
+	return prompt, nil
 }
 
 func GetClient() *ai.Client {
