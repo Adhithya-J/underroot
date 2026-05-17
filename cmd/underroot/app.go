@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
@@ -35,6 +36,8 @@ type Session struct {
 	Model        string
 	FolderName   string
 	ParentDir    string
+	CurrentDir   string
+	DirContent   string
 	CurrentInput string
 
 	LastScript      string
@@ -86,11 +89,28 @@ func UpdateWorkingDir(session *Session) {
 		// ui.PrintError("Failed to get cwd", err)
 		session.FolderName = "unknown"
 		session.ParentDir = "unknown"
+		session.CurrentDir = "unknown"
 		return
 	}
+	session.CurrentDir = cwd
 	session.FolderName = filepath.Base(cwd)
 	session.ParentDir = filepath.Dir(cwd)
 
+	files, err := os.ReadDir(cwd)
+	if err != nil {
+		session.DirContent = "Error reading directory content"
+		return
+	}
+	var content []string
+	for _, f := range files {
+		prefix := "[File]"
+		if f.IsDir() {
+			prefix = "[Dir]"
+
+		}
+		content = append(content, fmt.Sprintf("%s %s", prefix, f.Name()))
+	}
+	session.DirContent = strings.Join(content, ", ")
 }
 
 func EstimateTokens(txt string) int {
@@ -112,6 +132,10 @@ func toJson(v any) string {
 		return "null"
 	}
 	return string(out)
+}
+
+func GetCurrentDirInfo(session *Session) string {
+	return fmt.Sprintf("Current Folder Name: %s\nCurrent Working Directory: %s\nCurrent Directory Contents: %s\n", session.FolderName, session.CurrentDir, session.DirContent)
 }
 
 func GetSessionHistory(session *Session) string {
@@ -149,7 +173,7 @@ func GetLatestError(session *Session) string {
 		errorCorrection = "Analyze and fix the error."
 	}
 
-	return fmt.Sprintf("Current Error: %s\tSuggested Approach to solve it:%s\n", jsonCEOut, errorCorrection)
+	return fmt.Sprintf("Current Error: %s\tSuggested Approach to solve it: %s\n", jsonCEOut, errorCorrection)
 }
 
 func GetPastErrorHistory(session *Session) string {
@@ -179,10 +203,11 @@ func BuildPrompt(session *Session) (string, error) {
 	// the rest of the errors (if present) can be added as it is
 
 	// convo history should not include explaination when being fed into prompt
+	currentDirInfo := GetCurrentDirInfo(session)
 
 	sessionHistory := GetSessionHistory(session)
 
-	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, currentErrorString, historyOfErrorsString, sessionHistory)
+	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nCurrent Dir Info: %s\nPrevious Conversation History: %s", session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
 	return prompt, nil
 }
 
