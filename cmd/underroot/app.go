@@ -173,7 +173,7 @@ func GetLatestError(session *Session) string {
 		errorCorrection = "Analyze and fix the error."
 	}
 
-	return fmt.Sprintf("Current Error: %s\tSuggested Approach to solve it: %s\n", jsonCEOut, errorCorrection)
+	return fmt.Sprintf(`Current Error: %s\tSuggested Approach to solve it: %s\n`, jsonCEOut, errorCorrection)
 }
 
 func GetPastErrorHistory(session *Session) string {
@@ -207,7 +207,21 @@ func BuildPrompt(session *Session) (string, error) {
 
 	sessionHistory := GetSessionHistory(session)
 
-	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nCurrent Dir Info: %s\nPrevious Conversation History: %s", session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
+	prompt := fmt.Sprintf(`TASK
+	%s
+
+	ENVIRONMENT
+	%s
+
+	CURRENT ERROR
+	%s
+
+	PREVIOUS ERROR PATTERNS
+	%s
+
+	CONVERSATION HISTORY
+	%s`,
+		session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
 	return prompt, nil
 }
 
