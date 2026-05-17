@@ -106,58 +106,83 @@ func (s *Session) TotalTokens() int {
 
 }
 
-func BuildPrompt(session *Session) (string, error) {
-	// convo history should not include explaination when being fed into prompt
-	jsonHOut, jsonHErr := json.Marshal(session.History)
-	if jsonHErr != nil {
-		jsonHOut = nil
+func toJson(v any) string {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "null"
 	}
+	return string(out)
+}
 
+func GetSessionHistory(session *Session) string {
+	// convo history should not include explaination when being fed into prompt
+	// tempSessionHistory := ""
+	return toJson(session.History)
+}
+
+func GetLatestError(session *Session) string {
+	// this should build error resoultion strategy (for now fixed) for llm based on error type
 	n := len(session.ErrorHistory)
 
 	// add gating so json parsing does not fail
-	var (
-		jsonCEOut []byte = nil
-		jsonCEErr error
-		jsonEHOut []byte = nil
-		jsonEHErr error
-	)
 
 	// current error is last error in error history
-	if n > 0 {
-		currentError := session.ErrorHistory[n-1]
-		jsonCEOut, jsonCEErr = json.Marshal(currentError)
-		if jsonCEErr != nil {
-			jsonCEOut = nil
-		}
+	if n <= 0 {
+		return "Current Error: None"
 	}
 
-	// add gating so json parsing does not fail
-	if n > 1 {
-		jsonEHOut, jsonEHErr = json.Marshal(session.ErrorHistory[:n-1])
-		if jsonEHErr != nil {
-			jsonEHOut = nil
-		}
+	var errorCorrection string
+	currentError := session.ErrorHistory[n-1]
+	jsonCEOut := toJson(currentError)
+	switch currentError.ErrorType {
+	case "AIGenerationFailed":
+		errorCorrection = "Regenerate output with stricter validation."
+	case "AIGeneratedEmptyString":
+		errorCorrection = "Ensure response generation always returns content."
+	case "AIMarkedUnsafe":
+		errorCorrection = "Generate compliant and safe output."
+	case "RuleBasedValidationFailed":
+		errorCorrection = "Fix output so it satisfies validation rules."
+	case "ExectionFailed":
+		errorCorrection = "Fix execution/runtime issues."
+	default:
+		errorCorrection = "Analyze and fix the error."
 	}
+
+	return fmt.Sprintf("Current Error: %s\tSuggested Approach to solve it:%s\n", jsonCEOut, errorCorrection)
+}
+
+func GetPastErrorHistory(session *Session) string {
+	n := len(session.ErrorHistory)
+
+	// add gating so json parsing does not fail
+
+	if n <= 1 {
+		return "Previous Errors: None"
+	}
+
+	jsonEHOut := toJson(session.ErrorHistory[:n-1])
+
+	return fmt.Sprintf("History of previous Errors: %s", string(jsonEHOut))
+}
+
+func BuildPrompt(session *Session) (string, error) {
+	// add gating so json parsing does not fail
+
+	currentErrorString := GetLatestError(session)
+
+	// add gating so json parsing does not fail
+	historyOfErrorsString := GetPastErrorHistory(session)
 
 	// iterate though the jsonEHOut and keep the latest error and mark it as current error
 	// inject appropriate error fixing strategy based on error type for that
 	// the rest of the errors (if present) can be added as it is
 
-	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, string(jsonCEOut), string(jsonEHOut), string(jsonHOut))
+	// convo history should not include explaination when being fed into prompt
 
-	if jsonHErr != nil {
-		return prompt, jsonHErr
-	}
+	sessionHistory := GetSessionHistory(session)
 
-	if jsonCEErr != nil {
-		return prompt, jsonCEErr
-	}
-
-	if jsonEHErr != nil {
-		return prompt, jsonEHErr
-	}
-
+	prompt := fmt.Sprintf("User request: %s\nCurrent Error: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, currentErrorString, historyOfErrorsString, sessionHistory)
 	return prompt, nil
 }
 

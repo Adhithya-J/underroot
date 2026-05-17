@@ -60,7 +60,7 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 90 * time.Second,
+			Timeout: 240 * time.Second,
 		},
 		systemPrompt: Message{
 			Role:    "system",
