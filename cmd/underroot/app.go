@@ -118,7 +118,10 @@ func EstimateTokens(txt string) int {
 }
 
 func (s *Session) TotalTokens() int {
-	total := EstimateTokens(s.CurrentInput)
+	// add system prompt
+	// for now adding 250 tokens for that
+	systemPromptTokens := 250 // to be updated with actual count
+	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
 	for _, item := range s.History {
 		total += EstimateTokens(item.UserInput + item.Script + item.Explanation + item.Output)
 	}
