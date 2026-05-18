@@ -39,7 +39,7 @@ func main() {
 		if ui.ShouldExit(app.Session.CurrentInput) {
 			break
 		}
-
+		var attemptStatus bool = false
 		app.Session.ResetRequestState()
 		for i := 0; i < maxRetries; i++ {
 			app.Session.RetryCount = i
@@ -50,11 +50,11 @@ func main() {
 				ui.PrintError("Error parsing json", err)
 			}
 			ui.PrintGray("Generating response...")
-			response, runErr := app.Agent.Run(input)
+			response, errType, runErr := app.Agent.Run(input)
 			if runErr != nil {
 				ui.PrintError("Agent run failed", runErr)
 				app.Session.AddErrorHistory(AgentError{
-					ErrorType: "",
+					ErrorType: errType,
 					ErrorMsg:  runErr.Error(),
 					Script:    "",
 					Output:    "",
@@ -79,7 +79,7 @@ func main() {
 				if err != nil {
 					ui.PrintError("Execution Error", err)
 					app.Session.AddErrorHistory(AgentError{
-						ErrorType: "",
+						ErrorType: "ExectionFailed",
 						ErrorMsg:  err.Error(),
 						Script:    response.Script,
 						Output:    psOut,
@@ -98,6 +98,7 @@ func main() {
 
 				ui.PrintOutput(app.Session.LastOutput)
 				fmt.Println("Success!")
+				attemptStatus = true
 				fmt.Printf("History size: %d\n", len(app.Session.History))
 				ui.PrintLine()
 
@@ -108,6 +109,16 @@ func main() {
 				break
 
 			}
+		}
+		// adding failed attempt flags to llm knows what the previous requests were
+		if !attemptStatus {
+			app.Session.AddInteraction(Interaction{
+				UserInput:   app.Session.CurrentInput,
+				Explanation: "",
+				Script:      "",
+				Output:      "",
+			})
+
 		}
 	}
 

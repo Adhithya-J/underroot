@@ -31,37 +31,37 @@ func NewAgent(aiClient *ai.Client) *Agent {
 	}
 }
 
-func (a *Agent) Run(input string) (*RunResult, error) {
+func (a *Agent) Run(input string) (*RunResult, string, error) {
 
 	resp, _, err := a.aiClient.GetShellScript(input)
 
 	if err != nil {
 		errMsg := fmt.Errorf("AI Generation failed: %v", err)
-		return nil, errMsg
+		return nil, "AIGenerationFailed", errMsg
 	}
 
 	if resp.Script == "" {
 		errMsg := fmt.Errorf("AI Generation returned an empty script")
-		return nil, errMsg
+		return nil, "AIGeneratedEmptyString", errMsg
 	}
 
 	// AI based Safety
 	if !resp.IsSafe {
 		errMsg := fmt.Errorf("AI marked script unsafe: %s", resp.Explanation)
-		return nil, errMsg
+		return nil, "AIMarkedUnsafe", errMsg
 
 	}
 
 	// Static rule based check
 	if err := validator.Validate(resp.Script); err != nil {
 		errMsg := fmt.Errorf("Validation failed: %s", err)
-		return nil, errMsg
+		return nil, "RuleBasedValidationFailed", errMsg
 	}
 
 	return &RunResult{
 		Script:      resp.Script,
 		Explanation: resp.Explanation,
 		Success:     true,
-	}, nil
+	}, "", nil
 
 }

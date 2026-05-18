@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
@@ -26,6 +27,8 @@ type Interaction struct {
 	Explanation string `json:"explanation"`
 	Script      string `json:"script"`
 	Output      string `json:"output"`
+	// this should also have a flag to identify requests that have failed after 'n' attempts
+	// if it failed, summary of the 'n' attempts should be added for better context!
 }
 
 // Introduce session state
@@ -33,6 +36,8 @@ type Session struct {
 	Model        string
 	FolderName   string
 	ParentDir    string
+	CurrentDir   string
+	DirContent   string
 	CurrentInput string
 
 	LastScript      string
@@ -84,11 +89,28 @@ func UpdateWorkingDir(session *Session) {
 		// ui.PrintError("Failed to get cwd", err)
 		session.FolderName = "unknown"
 		session.ParentDir = "unknown"
+		session.CurrentDir = "unknown"
 		return
 	}
+	session.CurrentDir = cwd
 	session.FolderName = filepath.Base(cwd)
 	session.ParentDir = filepath.Dir(cwd)
 
+	files, err := os.ReadDir(cwd)
+	if err != nil {
+		session.DirContent = "Error reading directory content"
+		return
+	}
+	var content []string
+	for _, f := range files {
+		prefix := "[File]"
+		if f.IsDir() {
+			prefix = "[Dir]"
+
+		}
+		content = append(content, fmt.Sprintf("%s %s", prefix, f.Name()))
+	}
+	session.DirContent = strings.Join(content, ", ")
 }
 
 func EstimateTokens(txt string) int {
@@ -96,7 +118,10 @@ func EstimateTokens(txt string) int {
 }
 
 func (s *Session) TotalTokens() int {
-	total := EstimateTokens(s.CurrentInput)
+	// add system prompt
+	// for now adding 250 tokens for that
+	systemPromptTokens := 250 // to be updated with actual count
+	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
 	for _, item := range s.History {
 		total += EstimateTokens(item.UserInput + item.Script + item.Explanation + item.Output)
 	}
@@ -104,17 +129,103 @@ func (s *Session) TotalTokens() int {
 
 }
 
-func BuildPrompt(session *Session) (string, error) {
-	jsonHOut, jsonHErr := json.Marshal(session.History)
-	if jsonHErr != nil {
-		jsonHOut = nil
+func toJson(v any) string {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return string(out)
+}
+
+func GetCurrentDirInfo(session *Session) string {
+	return fmt.Sprintf("Current Folder Name: %s\nCurrent Working Directory: %s\nCurrent Directory Contents: %s\n", session.FolderName, session.CurrentDir, session.DirContent)
+}
+
+func GetSessionHistory(session *Session) string {
+	// convo history should not include explaination when being fed into prompt
+	// tempSessionHistory := ""
+	return toJson(session.History)
+}
+
+func GetLatestError(session *Session) string {
+	// this should build error resoultion strategy (for now fixed) for llm based on error type
+	n := len(session.ErrorHistory)
+
+	// add gating so json parsing does not fail
+
+	// current error is last error in error history
+	if n <= 0 {
+		return "Current Error: None"
 	}
 
-	jsonEHOut, jsonEHErr := json.Marshal(session.ErrorHistory)
-	if jsonEHErr != nil {
-		jsonEHOut = nil
+	var errorCorrection string
+	currentError := session.ErrorHistory[n-1]
+	jsonCEOut := toJson(currentError)
+	switch currentError.ErrorType {
+	case "AIGenerationFailed":
+		errorCorrection = "Regenerate output with stricter validation."
+	case "AIGeneratedEmptyString":
+		errorCorrection = "Ensure response generation always returns content."
+	case "AIMarkedUnsafe":
+		errorCorrection = "Generate compliant and safe output."
+	case "RuleBasedValidationFailed":
+		errorCorrection = "Fix output so it satisfies validation rules."
+	case "ExectionFailed":
+		errorCorrection = "Fix execution/runtime issues."
+	default:
+		errorCorrection = "Analyze and fix the error."
 	}
-	return fmt.Sprintf("User request: %s\nPrevious Errors: %s\nPrevious Conversation History: %s", session.CurrentInput, string(jsonEHOut), string(jsonHOut)), jsonEHErr
+
+	return fmt.Sprintf(`Current Error: %s\tSuggested Approach to solve it: %s\n`, jsonCEOut, errorCorrection)
+}
+
+func GetPastErrorHistory(session *Session) string {
+	n := len(session.ErrorHistory)
+
+	// add gating so json parsing does not fail
+
+	if n <= 1 {
+		return "Previous Errors: None"
+	}
+
+	jsonEHOut := toJson(session.ErrorHistory[:n-1])
+
+	return fmt.Sprintf("History of previous Errors: %s", string(jsonEHOut))
+}
+
+func BuildPrompt(session *Session) (string, error) {
+	// add gating so json parsing does not fail
+
+	currentErrorString := GetLatestError(session)
+
+	// add gating so json parsing does not fail
+	historyOfErrorsString := GetPastErrorHistory(session)
+
+	// iterate though the jsonEHOut and keep the latest error and mark it as current error
+	// inject appropriate error fixing strategy based on error type for that
+	// the rest of the errors (if present) can be added as it is
+
+	// convo history should not include explaination when being fed into prompt
+	currentDirInfo := GetCurrentDirInfo(session)
+
+	sessionHistory := GetSessionHistory(session)
+
+	prompt := fmt.Sprintf(`TASK
+	%s
+
+	ENVIRONMENT
+	%s
+
+	CURRENT ERROR
+	%s
+
+	PREVIOUS ERROR PATTERNS
+	%s
+
+	CONVERSATION HISTORY
+	%s`,
+		session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
+	return prompt, nil
 }
 
 func GetClient() *ai.Client {
