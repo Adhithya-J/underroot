@@ -53,7 +53,7 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 
 }
 
-func (a *Agent) Run(initialInput string) (*RunResult, string, error) {
+func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	currentPrompt := initialInput
 	var resp *ai.AgentResponse
 	var err error
@@ -71,7 +71,7 @@ func (a *Agent) Run(initialInput string) (*RunResult, string, error) {
 			if err != nil {
 				result = "Error : " + err.Error()
 			}
-			currentPrompt = fmt.Sprintf("%s\n\nTool Result (%s):\n%s", currentPrompt, resp.ToolCall.Name, result)
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf("\n\nTool Result (%s):\n%s", resp.ToolCall.Name, result)
 
 		}
 

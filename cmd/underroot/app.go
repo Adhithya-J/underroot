@@ -101,8 +101,9 @@ func UpdateWorkingDir(session *Session) {
 		session.DirContent = "Error reading directory content"
 		return
 	}
+	const max_files = 10
 	var content []string
-	for _, f := range files {
+	for _, f := range files[:max_files] {
 		prefix := "[File]"
 		if f.IsDir() {
 			prefix = "[Dir]"
@@ -144,6 +145,7 @@ func GetCurrentDirInfo(session *Session) string {
 func GetSessionHistory(session *Session) string {
 	// convo history should not include explaination when being fed into prompt
 	// tempSessionHistory := ""
+
 	return toJson(session.History)
 }
 
@@ -193,37 +195,33 @@ func GetPastErrorHistory(session *Session) string {
 	return fmt.Sprintf("History of previous Errors: %s", string(jsonEHOut))
 }
 
-func BuildPrompt(session *Session) (string, error) {
+func BuildPrompt(session *Session) ([]ai.Message, error) { // message 0 should be system so we can make sure it is not lost. message n is last user request
+
+	var prompt []ai.Message
 
 	// iterate though the jsonEHOut and keep the latest error and mark it as current error
 	// inject appropriate error fixing strategy based on error type for that
-
 	currentErrorString := GetLatestError(session) // latest error with suggest fix
 
 	// the rest of the errors (if present) can be added as it is
 	historyOfErrorsString := GetPastErrorHistory(session) // past errors excluding latest one
 
 	// current dir, parent dir, current folder name, directory contents are added to prompt
+	// add to last user message
 	currentDirInfo := GetCurrentDirInfo(session)
 
 	// session history includes previous conversations - which inclues user input, explaination of generated script, script, ps output
 	sessionHistory := GetSessionHistory(session)
 
-	prompt := fmt.Sprintf(`TASK
-	%s
-
-	ENVIRONMENT
-	%s
-
-	CURRENT ERROR
-	%s
-
-	PREVIOUS ERROR PATTERNS
-	%s
-
-	CONVERSATION HISTORY
-	%s`,
-		session.CurrentInput, currentDirInfo, currentErrorString, historyOfErrorsString, sessionHistory)
+	prompt = append(prompt, ai.Message{
+		Role: "user",
+		Content: fmt.Sprintf(`TASK
+	%s\n\tENVIRONMENT
+	%s\n\tCURRENT ERROR
+	%s\n\tPREVIOUS ERROR PATTERNS
+	%s\n\tCONVERSATION HISTORY
+	%s`, session.CurrentInput, currentDirInfo, currentErrorString, historyOfErrorsString, sessionHistory),
+	})
 	return prompt, nil
 }
 

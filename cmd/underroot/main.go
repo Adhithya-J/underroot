@@ -123,7 +123,7 @@ func main() {
 			app.Session.AddInteraction(Interaction{
 				UserInput:   app.Session.CurrentInput,
 				Explanation: "",
-				Script:      "",
+				Script:      "<could-not-be-generated>",
 				Output:      "",
 			})
 

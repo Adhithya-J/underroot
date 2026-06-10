@@ -186,14 +186,11 @@ func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, err
 	return "", nil
 }
 
-func BuildMessages(userInput string) []Message {
-	return []Message{
-		SystemPrompt(),
-		{
-			Role:    "user",
-			Content: userInput,
-		},
-	}
+func BuildMessages(userInput []Message) []Message {
+	var result []Message
+	result = append(result, SystemPrompt())
+	result = append(result, userInput...)
+	return result
 }
 
 func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
@@ -231,7 +228,7 @@ func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, e
 
 }
 
-func (c *Client) Chat(input string) (*ChatCompletionsResponse, error) {
+func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 
 	messages := BuildMessages(input)
 
@@ -263,10 +260,10 @@ func (c *Client) Chat(input string) (*ChatCompletionsResponse, error) {
 	return &result, nil
 }
 
-func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
+func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error) {
 	if c.config.UseMock {
 		return &AgentResponse{
-			Script:      fmt.Sprintf("echo 'Mock: %s'", input),
+			Script:      fmt.Sprintf("echo 'Mock: %s'", input[len(input)-1].Content),
 			Explanation: "Mock response",
 			IsSafe:      true,
 		}, "", nil
