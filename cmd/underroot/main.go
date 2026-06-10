@@ -71,8 +71,8 @@ func main() {
 			ui.PrintLine()
 			app.Session.SetLastResponse(response.Script, response.Explanation)
 
-			ui.PrintScript(app.Session.LastScript)
-			ui.PrintExplanation(app.Session.LastExplanation)
+			ui.PrintScript(app.Session.CurrentInteraction.FinalScript)
+			ui.PrintExplanation(app.Session.CurrentInteraction.FinalExplanation)
 			ui.PrintLine()
 
 			permitted, err := ui.AskForApproval(app.Scanner)
@@ -97,14 +97,14 @@ func main() {
 				app.Session.SetOutput(psOut)
 
 				interaction := Interaction{
-					UserInput:   app.Session.CurrentInput,
-					Explanation: response.Explanation,
-					Script:      response.Script,
-					Output:      psOut,
+					UserInput:        app.Session.CurrentInput,
+					FinalExplanation: response.Explanation,
+					FinalScript:      response.Script,
+					FinalOutput:      psOut,
 				}
 				app.Session.AddInteraction(interaction)
 
-				ui.PrintOutput(app.Session.LastOutput)
+				ui.PrintOutput(app.Session.CurrentInteraction.FinalOutput)
 				fmt.Println("Success!")
 				attemptStatus = true
 				fmt.Printf("History size: %d\n", len(app.Session.History))
@@ -121,10 +121,10 @@ func main() {
 		// adding failed attempt flags to llm knows what the previous requests were
 		if !attemptStatus {
 			app.Session.AddInteraction(Interaction{
-				UserInput:   app.Session.CurrentInput,
-				Explanation: "",
-				Script:      "<could-not-be-generated>",
-				Output:      "",
+				UserInput:        app.Session.CurrentInput,
+				FinalExplanation: "",
+				FinalScript:      "<could-not-be-generated>",
+				FinalOutput:      "",
 			})
 
 		}

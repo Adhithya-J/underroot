@@ -22,32 +22,50 @@ type AgentError struct {
 	Output    string `json:"output"`
 }
 
+type Attempt struct {
+	AttemptNo    int        `json:"attempt_no"`
+	Explaination string     `json:"explaination,omitempty"`
+	Script       string     `json:"script,omitempty"`
+	Output       string     `json:"output,omitempty"`
+	Error        AgentError `json:"error,omitempty"`
+	Success      bool       `json:"success,omitempty"`
+}
+
 type Interaction struct {
-	UserInput   string `json:"user_input"`
-	Explanation string `json:"explanation"`
-	Script      string `json:"script"`
-	Output      string `json:"output"`
+	UserInput string    `json:"user_input"`
+	Attempts  []Attempt `json:"attempts"`
+
+	FinalScript      string `json:"final_script,omitempty"`
+	FinalExplanation string `json:"final_explanation,omitempty"`
+	FinalOutput      string `json:"final_output,omitempty"`
 	// this should also have a flag to identify requests that have failed after 'n' attempts
 	// if it failed, summary of the 'n' attempts should be added for better context!
+	Status         string `json:"status"`
+	Failed         bool   `json:"failed"`
+	AttemptCount   int    `json:"attempt_count"`
+	FailureSummary string `json:"failure_summary"`
 }
 
 // Introduce session state
 type Session struct {
-	Model        string
-	FolderName   string
-	ParentDir    string
-	CurrentDir   string
-	DirContent   string
-	CurrentInput string
+	Model      string `json:"model"`
+	FolderName string `json:"folder_name"`
+	ParentDir  string `json:"parent_dir"`
+	CurrentDir string `json:"current_dir"`
 
-	LastScript      string
-	LastExplanation string
-	LastOutput      string
+	DirContent   string `json:"dir_content,omitempty"`
+	CurrentInput string `json:"current_input,omitempty"`
 
-	RetryCount int
+	RetryCount int `json:"retry_count"`
+	MaxRetries int `json:"max_retries"`
 
-	ErrorHistory []AgentError
-	History      []Interaction
+	ErrorHistory []AgentError  `json:"error_history,omitempty"`
+	History      []Interaction `json:"history,omitempty"`
+
+	CurrentInteraction *Interaction `json:"current_interaction,omitempty"`
+
+	// for now we can keep it as a simple bool to execute commands
+	// ExecutionPermission bool `json:"execution_permission"`
 
 	// you might also want to manage session level execution permission within the this
 	// apart from a global execution permissions
@@ -70,8 +88,8 @@ func (s *Session) AddErrorHistory(error AgentError) {
 }
 
 func (s *Session) SetLastResponse(script string, explanation string) {
-	s.LastScript = script
-	s.LastExplanation = explanation
+	s.CurrentInteraction.FinalScript = script
+	s.CurrentInteraction.FinalExplanation = explanation
 }
 
 func (s *Session) ResetRequestState() {
@@ -80,7 +98,7 @@ func (s *Session) ResetRequestState() {
 }
 
 func (s *Session) SetOutput(psout string) {
-	s.LastOutput = psout
+	s.CurrentInteraction.FinalOutput = psout
 }
 
 func UpdateWorkingDir(session *Session) {
@@ -118,13 +136,13 @@ func EstimateTokens(txt string) int {
 	return utf8.RuneCountInString(txt) / 4
 }
 
-func (s *Session) TotalTokens() int {
+func (s *Session) TotalTokens() int { // TODO: this is entirely wrong and unreliable!! fix this
 	// add system prompt
 	// for now adding 250 tokens for that
 	systemPromptTokens := 250 // to be updated with actual count
 	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
 	for _, item := range s.History {
-		total += EstimateTokens(item.UserInput + item.Script + item.Explanation + item.Output)
+		total += EstimateTokens(item.UserInput + item.FinalScript + item.FinalExplanation + item.FinalOutput)
 	}
 	return total
 
