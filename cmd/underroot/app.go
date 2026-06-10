@@ -176,7 +176,7 @@ func GetLatestError(session *Session) string {
 		errorCorrection = "Analyze and fix the error."
 	}
 
-	return fmt.Sprintf(`Current Error: %s\tSuggested Approach to solve it: %s\n`, jsonCEOut, errorCorrection)
+	return fmt.Sprintf("Current Error: %s\nSuggested Approach to solve it: %s\n", jsonCEOut, errorCorrection)
 }
 
 func GetPastErrorHistory(session *Session) string {
@@ -194,20 +194,19 @@ func GetPastErrorHistory(session *Session) string {
 }
 
 func BuildPrompt(session *Session) (string, error) {
-	// add gating so json parsing does not fail
-
-	currentErrorString := GetLatestError(session)
-
-	// add gating so json parsing does not fail
-	historyOfErrorsString := GetPastErrorHistory(session)
 
 	// iterate though the jsonEHOut and keep the latest error and mark it as current error
 	// inject appropriate error fixing strategy based on error type for that
-	// the rest of the errors (if present) can be added as it is
 
-	// convo history should not include explaination when being fed into prompt
+	currentErrorString := GetLatestError(session) // latest error with suggest fix
+
+	// the rest of the errors (if present) can be added as it is
+	historyOfErrorsString := GetPastErrorHistory(session) // past errors excluding latest one
+
+	// current dir, parent dir, current folder name, directory contents are added to prompt
 	currentDirInfo := GetCurrentDirInfo(session)
 
+	// session history includes previous conversations - which inclues user input, explaination of generated script, script, ps output
 	sessionHistory := GetSessionHistory(session)
 
 	prompt := fmt.Sprintf(`TASK
@@ -224,7 +223,7 @@ func BuildPrompt(session *Session) (string, error) {
 
 	CONVERSATION HISTORY
 	%s`,
-		session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
+		session.CurrentInput, currentDirInfo, currentErrorString, historyOfErrorsString, sessionHistory)
 	return prompt, nil
 }
 

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -18,11 +17,17 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+type ToolCall struct {
+	Name string                 `json:"name"`
+	Args map[string]interface{} `json:"args"`
+}
+
 // AgentResponse defines the structured output expected from the AI.
 type AgentResponse struct {
-	Script      string `json:"script"`
-	Explanation string `json:"explanation"`
-	IsSafe      bool   `json:"is_safe"`
+	ToolCall    *ToolCall `json:"tool_call,omitempty"`
+	Script      string    `json:"script,omitempty"`
+	Explanation string    `json:"explanation,omitempty"`
+	IsSafe      bool      `json:"is_safe"`
 }
 
 // Config holds the application configuration.
@@ -34,72 +39,131 @@ type Config struct {
 }
 
 type Client struct {
-	config       Config
-	httpClient   *http.Client
-	systemPrompt Message
+	config     Config
+	httpClient *http.Client
+	// systemPrompt Message
+}
+
+type ChatCompletionsRequest struct {
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+}
+
+type ChatCompletionsResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
 // client should not handle history!!!
 // think in terms of separation of concerns. each function should care about what it wants to do not about history of previous function calls
 
-func NewClient(cfg Config) (*Client, error) {
-	if !cfg.UseMock {
-		if cfg.OpenAIAPIKey == "" {
-			return nil, errors.New("Missing OpenAI API Key")
-		}
+func SystemPrompt() Message {
+	return Message{
+		Role: "system",
+		Content: `You are a PowerShell command generator.
 
-		if cfg.OpenAIBaseURL == "" {
-			return nil, errors.New("Missing OpenAI Base URL")
-		}
+		Generate safe, minimal, valid PowerShell scripts that satisfy the user's request.
 
-		if cfg.OpenAIModel == "" {
-			return nil, errors.New("Missing OpenAI Model")
-		}
+		Rules
 
+		1. Output
+		- Return only valid JSON matching the required schema:
+		{
+		  "tool_call": { "name": "tool_name", "args": { "arg_name": "value" } },
+		  "script": "powershell_script",
+		  "explanation": "explanation_of_action",
+		  "is_safe": true
+		}
+		- Use "tool_call" ONLY when you need more information from the environment.
+		- Use "script" ONLY when you are ready to execute a PowerShell command.
+		- Never use both "tool_call" and "script" in the same response.
+		- Do not use markdown fences.
+		- Do not include commentary outside JSON.
+
+		2. Script Style
+		- Prefer minimal, idiomatic PowerShell.
+		- Prefer read-only operations unless modification is explicitly requested.
+		- Avoid aliases unless they improve clarity.
+		- Avoid interactive commands.
+		- Avoid background, watcher, or streaming operations unless explicitly requested.
+		- Avoid unsupported or conflicting parameters.
+		- Avoid unnecessary variables or pipelines.
+		- Prefer deterministic output.
+
+		3. Safety
+		- Set is_safe=false for:
+		  - destructive or dangerous actions
+		  - privilege escalation
+		  - persistence or evasion
+		  - credential access or exfiltration
+		  - ransomware-like behavior
+		  - ambiguous high-risk requests
+		  - unauthorized network execution
+		- Never bypass execution policy.
+		- Never disable security tooling.
+
+		4. File & Path Handling
+		- Never guess paths.
+		- If a required path is not explicitly listed in ENVIRONMENT, first use:
+		  - list_dir
+		  - exists
+		- Only generate a script after confirming paths.
+		- If a tool is used, leave script empty until discovery is complete.
+
+		5. Repair Behavior
+		- If a previous execution failed:
+		  - minimally modify the prior script
+		  - preserve original intent
+		  - fix only the reported error when possible
+
+		Available Tools
+		1. list_dir({"path":"string"}) - Lists contents of a directory.
+		2. exists({"path":"string"}) - Checks if a path exists.
+		3. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
+
+		Workflow
+		1. Use tools if more information is required.
+		2. Once sufficient information is available, return:
+		   - script
+		   - explanation
+		   - is_safe
+		3. If the request cannot be completed safely, set is_safe=false.
+		`,
 	}
+}
+
+func (cfg Config) Validate() error {
+	if cfg.UseMock {
+		return nil
+	}
+	if cfg.OpenAIAPIKey == "" {
+		return errors.New("Missing OpenAI API Key")
+	}
+
+	if cfg.OpenAIBaseURL == "" {
+		return errors.New("Missing OpenAI Base URL")
+	}
+
+	if cfg.OpenAIModel == "" {
+		return errors.New("Missing OpenAI Model")
+	}
+	return nil
+
+}
+
+func NewClient(cfg Config) (*Client, error) {
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 240 * time.Second,
-		},
-		systemPrompt: Message{
-			Role: "system",
-			Content: `You are a PowerShell command generation engine.
-
-Your task is to generate safe, minimal, valid PowerShell scripts that satisfy the user's request.
-
-Requirements:
-- Always return valid JSON matching the required schema.
-- Never include markdown fences.
-- Never include commentary outside JSON.
-- Prefer minimal commands.
-- Prefer idiomatic PowerShell.
-- Prefer read-only operations unless modification is explicitly requested.
-- Avoid aliases unless they improve clarity.
-- Avoid interactive commands.
-- Avoid background, watcher, or streaming operations unless explicitly requested.
-- Avoid unsupported or conflicting parameter combinations.
-- Avoid unnecessary pipelines and variables.
-- Prefer deterministic output.
-
-Safety Rules:
-- If the request is destructive, dangerous, privilege-escalating, persistent, network-executing, or ambiguous, set is_safe=false.
-- Refuse ransomware-like, credential-stealing, persistence, evasion, or destructive behavior.
-- Never bypass PowerShell execution policy.
-- Never disable security tooling.
-
-Repair Rules:
-- If previous execution failed, minimally modify the prior script.
-- Preserve original intent during repair.
-- Prefer fixing only the reported error.
-
-Output JSON schema:
-{
-  "script": "string",
-  "explanation": "string",
-  "is_safe": true
-}`,
-		},
+			Timeout: 240 * time.Second},
 	}, nil
 }
 
@@ -122,9 +186,9 @@ func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, err
 	return "", nil
 }
 
-func (c *Client) BuildMessages(userInput string) []Message {
+func BuildMessages(userInput string) []Message {
 	return []Message{
-		c.systemPrompt,
+		SystemPrompt(),
 		{
 			Role:    "user",
 			Content: userInput,
@@ -132,7 +196,7 @@ func (c *Client) BuildMessages(userInput string) []Message {
 	}
 }
 
-func (c *Client) MakeHTTPRequest(body map[string]interface{}) (*http.Response, error) {
+func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
 
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -167,6 +231,38 @@ func (c *Client) MakeHTTPRequest(body map[string]interface{}) (*http.Response, e
 
 }
 
+func (c *Client) Chat(input string) (*ChatCompletionsResponse, error) {
+
+	messages := BuildMessages(input)
+
+	body := ChatCompletionsRequest{
+		Model:    c.config.OpenAIModel,
+		Messages: messages,
+	}
+
+	resp, err := c.MakeHTTPRequest(body)
+	if err != nil {
+		return &ChatCompletionsResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// body, _ := io.ReadAll(resp.Body)
+		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d", resp.StatusCode)
+	}
+
+	var result ChatCompletionsResponse
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return &ChatCompletionsResponse{}, err
+	}
+
+	if len(result.Choices) == 0 {
+		return &ChatCompletionsResponse{}, fmt.Errorf("empty response")
+	}
+	return &result, nil
+}
+
 func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 	if c.config.UseMock {
 		return &AgentResponse{
@@ -176,40 +272,15 @@ func (c *Client) GetShellScript(input string) (*AgentResponse, string, error) {
 		}, "", nil
 	}
 
-	messages := c.BuildMessages(input)
-
-	body := map[string]interface{}{
-		"model":    c.config.OpenAIModel,
-		"messages": messages,
-	}
-
-	resp, err := c.MakeHTTPRequest(body)
+	result, err := c.Chat(input)
 	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, string(body), fmt.Errorf("api returned %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, "", err
-	}
-
-	if len(result.Choices) == 0 {
-		return nil, "", fmt.Errorf("empty response")
+		return &AgentResponse{}, "", err
 	}
 
 	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
+	if err != nil {
+		return &AgentResponse{}, "", err
+	}
+
 	return output, "", nil
 }
