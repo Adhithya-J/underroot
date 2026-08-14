@@ -62,7 +62,7 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	for i := 0; i < 5; i++ {
 		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
 		if err != nil {
-			errMsg := fmt.Errorf("AI Generation failed: %v", err)
+			errMsg := fmt.Errorf("AI generation failed: %v", err)
 			return nil, "AIGenerationFailed", errMsg
 		}
 		if resp.ToolCall != nil {
@@ -82,7 +82,7 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	}
 
 	if resp.Script == "" {
-		errMsg := fmt.Errorf("AI Generation returned an empty script")
+		errMsg := fmt.Errorf("AI generation returned an empty script")
 		return nil, "AIGeneratedEmptyString", errMsg
 	}
 
@@ -95,7 +95,7 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 
 	// Static rule based check
 	if err := validator.Validate(resp.Script); err != nil {
-		errMsg := fmt.Errorf("Validation failed: %s", err)
+		errMsg := fmt.Errorf("validation failed: %s", err)
 		return nil, "RuleBasedValidationFailed", errMsg
 	}
 

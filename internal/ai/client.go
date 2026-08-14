@@ -140,15 +140,15 @@ func (cfg Config) Validate() error {
 		return nil
 	}
 	if cfg.OpenAIAPIKey == "" {
-		return errors.New("Missing OpenAI API Key")
+		return errors.New("missing openai api key")
 	}
 
 	if cfg.OpenAIBaseURL == "" {
-		return errors.New("Missing OpenAI Base URL")
+		return errors.New("missing openai base url")
 	}
 
 	if cfg.OpenAIModel == "" {
-		return errors.New("Missing OpenAI Model")
+		return errors.New("missing openai model")
 	}
 	return nil
 

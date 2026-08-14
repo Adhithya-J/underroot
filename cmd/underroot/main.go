@@ -41,7 +41,7 @@ func main() {
 		if ui.ShouldExit(app.Session.CurrentInput) {
 			break
 		}
-		var attemptStatus bool = false // this tracks whether user question is successfully answered after all retries
+		var attemptStatus = false // this tracks whether user question is successfully answered after all retries
 		// depending on the value, what gets added to session state ctx varies
 		// previously, we were was only storing successful attempts, then realized, unsuccessful attempts will also be useful
 		// but what to store in unsuccessful attempts? - the error message, but how would you structure it, i haven't explore on that,
