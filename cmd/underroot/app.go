@@ -22,32 +22,50 @@ type AgentError struct {
 	Output    string `json:"output"`
 }
 
+type Attempt struct {
+	AttemptNo    int        `json:"attempt_no"`
+	Explaination string     `json:"explaination,omitempty"`
+	Script       string     `json:"script,omitempty"`
+	Output       string     `json:"output,omitempty"`
+	Error        AgentError `json:"error,omitempty"`
+	Success      bool       `json:"success,omitempty"`
+}
+
 type Interaction struct {
-	UserInput   string `json:"user_input"`
-	Explanation string `json:"explanation"`
-	Script      string `json:"script"`
-	Output      string `json:"output"`
+	UserInput string    `json:"user_input"`
+	Attempts  []Attempt `json:"attempts"`
+
+	FinalScript      string `json:"final_script,omitempty"`
+	FinalExplanation string `json:"final_explanation,omitempty"`
+	FinalOutput      string `json:"final_output,omitempty"`
 	// this should also have a flag to identify requests that have failed after 'n' attempts
 	// if it failed, summary of the 'n' attempts should be added for better context!
+	Status         string `json:"status"`
+	Failed         bool   `json:"failed"`
+	AttemptCount   int    `json:"attempt_count"`
+	FailureSummary string `json:"failure_summary"`
 }
 
 // Introduce session state
 type Session struct {
-	Model        string
-	FolderName   string
-	ParentDir    string
-	CurrentDir   string
-	DirContent   string
-	CurrentInput string
+	Model      string `json:"model"`
+	FolderName string `json:"folder_name"`
+	ParentDir  string `json:"parent_dir"`
+	CurrentDir string `json:"current_dir"`
 
-	LastScript      string
-	LastExplanation string
-	LastOutput      string
+	DirContent   string `json:"dir_content,omitempty"`
+	CurrentInput string `json:"current_input,omitempty"`
 
-	RetryCount int
+	RetryCount int `json:"retry_count"`
+	MaxRetries int `json:"max_retries"`
 
-	ErrorHistory []AgentError
-	History      []Interaction
+	ErrorHistory []AgentError  `json:"error_history,omitempty"`
+	History      []Interaction `json:"history,omitempty"`
+
+	CurrentInteraction *Interaction `json:"current_interaction,omitempty"`
+
+	// for now we can keep it as a simple bool to execute commands
+	// ExecutionPermission bool `json:"execution_permission"`
 
 	// you might also want to manage session level execution permission within the this
 	// apart from a global execution permissions
@@ -70,8 +88,8 @@ func (s *Session) AddErrorHistory(error AgentError) {
 }
 
 func (s *Session) SetLastResponse(script string, explanation string) {
-	s.LastScript = script
-	s.LastExplanation = explanation
+	s.CurrentInteraction.FinalScript = script
+	s.CurrentInteraction.FinalExplanation = explanation
 }
 
 func (s *Session) ResetRequestState() {
@@ -80,7 +98,7 @@ func (s *Session) ResetRequestState() {
 }
 
 func (s *Session) SetOutput(psout string) {
-	s.LastOutput = psout
+	s.CurrentInteraction.FinalOutput = psout
 }
 
 func UpdateWorkingDir(session *Session) {
@@ -101,8 +119,9 @@ func UpdateWorkingDir(session *Session) {
 		session.DirContent = "Error reading directory content"
 		return
 	}
+	const max_files = 10
 	var content []string
-	for _, f := range files {
+	for _, f := range files[:max_files] {
 		prefix := "[File]"
 		if f.IsDir() {
 			prefix = "[Dir]"
@@ -117,13 +136,13 @@ func EstimateTokens(txt string) int {
 	return utf8.RuneCountInString(txt) / 4
 }
 
-func (s *Session) TotalTokens() int {
+func (s *Session) TotalTokens() int { // TODO: this is entirely wrong and unreliable!! fix this
 	// add system prompt
 	// for now adding 250 tokens for that
 	systemPromptTokens := 250 // to be updated with actual count
 	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
 	for _, item := range s.History {
-		total += EstimateTokens(item.UserInput + item.Script + item.Explanation + item.Output)
+		total += EstimateTokens(item.UserInput + item.FinalScript + item.FinalExplanation + item.FinalOutput)
 	}
 	return total
 
@@ -144,6 +163,7 @@ func GetCurrentDirInfo(session *Session) string {
 func GetSessionHistory(session *Session) string {
 	// convo history should not include explaination when being fed into prompt
 	// tempSessionHistory := ""
+
 	return toJson(session.History)
 }
 
@@ -176,7 +196,7 @@ func GetLatestError(session *Session) string {
 		errorCorrection = "Analyze and fix the error."
 	}
 
-	return fmt.Sprintf(`Current Error: %s\tSuggested Approach to solve it: %s\n`, jsonCEOut, errorCorrection)
+	return fmt.Sprintf("Current Error: %s\nSuggested Approach to solve it: %s\n", jsonCEOut, errorCorrection)
 }
 
 func GetPastErrorHistory(session *Session) string {
@@ -193,38 +213,33 @@ func GetPastErrorHistory(session *Session) string {
 	return fmt.Sprintf("History of previous Errors: %s", string(jsonEHOut))
 }
 
-func BuildPrompt(session *Session) (string, error) {
-	// add gating so json parsing does not fail
+func BuildPrompt(session *Session) ([]ai.Message, error) { // message 0 should be system so we can make sure it is not lost. message n is last user request
 
-	currentErrorString := GetLatestError(session)
-
-	// add gating so json parsing does not fail
-	historyOfErrorsString := GetPastErrorHistory(session)
+	var prompt []ai.Message
 
 	// iterate though the jsonEHOut and keep the latest error and mark it as current error
 	// inject appropriate error fixing strategy based on error type for that
-	// the rest of the errors (if present) can be added as it is
+	currentErrorString := GetLatestError(session) // latest error with suggest fix
 
-	// convo history should not include explaination when being fed into prompt
+	// the rest of the errors (if present) can be added as it is
+	historyOfErrorsString := GetPastErrorHistory(session) // past errors excluding latest one
+
+	// current dir, parent dir, current folder name, directory contents are added to prompt
+	// add to last user message
 	currentDirInfo := GetCurrentDirInfo(session)
 
+	// session history includes previous conversations - which inclues user input, explaination of generated script, script, ps output
 	sessionHistory := GetSessionHistory(session)
 
-	prompt := fmt.Sprintf(`TASK
-	%s
-
-	ENVIRONMENT
-	%s
-
-	CURRENT ERROR
-	%s
-
-	PREVIOUS ERROR PATTERNS
-	%s
-
-	CONVERSATION HISTORY
-	%s`,
-		session.CurrentInput, currentErrorString, historyOfErrorsString, currentDirInfo, sessionHistory)
+	prompt = append(prompt, ai.Message{
+		Role: "user",
+		Content: fmt.Sprintf(`TASK
+	%s\n\tENVIRONMENT
+	%s\n\tCURRENT ERROR
+	%s\n\tPREVIOUS ERROR PATTERNS
+	%s\n\tCONVERSATION HISTORY
+	%s`, session.CurrentInput, currentDirInfo, currentErrorString, historyOfErrorsString, sessionHistory),
+	})
 	return prompt, nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/executor"
+	"github.com/Adhithya-J/underroot.git/internal/ui"
 	"github.com/Adhithya-J/underroot.git/internal/validator"
 )
 
@@ -31,17 +33,56 @@ func NewAgent(aiClient *ai.Client) *Agent {
 	}
 }
 
-func (a *Agent) Run(input string) (*RunResult, string, error) {
+type ToolFunc func(map[string]any) (string, error)
 
-	resp, _, err := a.aiClient.GetShellScript(input)
+func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
+	path, ok := tc.Args["path"].(string)
+	if !ok {
+		return "", fmt.Errorf("missing 'path' argument")
+	}
+	switch tc.Name {
+	case "list_dir":
+		return executor.List_Dir(path) // Or executor directly if bypassing validator
+	case "read_file":
+		return executor.Read_File(path)
+	case "exists":
+		return executor.Exists(path)
+	default:
+		return "", fmt.Errorf("unknown tool: %s", tc.Name)
+	}
 
-	if err != nil {
-		errMsg := fmt.Errorf("AI Generation failed: %v", err)
-		return nil, "AIGenerationFailed", errMsg
+}
+
+func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
+	currentPrompt := initialInput
+	var resp *ai.AgentResponse
+	var err error
+	// var errType string
+
+	for i := 0; i < 5; i++ {
+		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
+		if err != nil {
+			errMsg := fmt.Errorf("AI generation failed: %v", err)
+			return nil, "AIGenerationFailed", errMsg
+		}
+		if resp.ToolCall != nil {
+			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
+			result, err := a.ExecuteTool(resp.ToolCall)
+			if err != nil {
+				result = "Error : " + err.Error()
+			}
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf("\n\nTool Result (%s):\n%s", resp.ToolCall.Name, result)
+
+		}
+
+		if resp.ToolCall == nil {
+			break
+		}
+
 	}
 
 	if resp.Script == "" {
-		errMsg := fmt.Errorf("AI Generation returned an empty script")
+		errMsg := fmt.Errorf("AI generation returned an empty script")
 		return nil, "AIGeneratedEmptyString", errMsg
 	}
 
@@ -54,7 +95,7 @@ func (a *Agent) Run(input string) (*RunResult, string, error) {
 
 	// Static rule based check
 	if err := validator.Validate(resp.Script); err != nil {
-		errMsg := fmt.Errorf("Validation failed: %s", err)
+		errMsg := fmt.Errorf("validation failed: %s", err)
 		return nil, "RuleBasedValidationFailed", errMsg
 	}
 
