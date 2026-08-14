@@ -4,6 +4,15 @@ on:
   pull_request:
     branches:
       - main
+    # Avoid running heavy CI on markdown/docs-only changes
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+# Cancel obsolete, in-flight runs when new commits are pushed to the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -13,10 +22,14 @@ jobs:
     name: Format, lint, test, and security scan
     runs-on: ubuntu-latest
 
+    # HARD CAP: Prevents hanging scripts from consuming runner queue hours
+    timeout-minutes: 10
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
         with:
+          # Standard fetch depth (1) is faster; use fetch-depth: 0 ONLY if gitleaks requires full history
           fetch-depth: 0
 
       - name: Set up Go
@@ -30,17 +43,18 @@ jobs:
         run: test -z "$(gofmt -l .)"
 
       - name: Run tests
-        run: go test ./...
+        run: go test -v ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.12.2
+          version: v1.60.3
 
       - name: Run gosec
-        uses: securego/gosec@v2.28.0
-        with:
-          args: ./...
+        # Running via official Go binary step avoids running arbitrary composite action scripts
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec ./...
 
       - name: Scan for secrets with gitleaks
         uses: gitleaks/gitleaks-action@v2
