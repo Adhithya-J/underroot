@@ -1,0 +1,84 @@
+run:
+  # Maximum execution time for linting
+  timeout: 5m
+  # Include test files in linting
+  tests: true
+
+linters-settings:
+  gofumpt:
+    # gofumpt is a stricter, cleaner superset of gofmt
+    extra-rules: true
+
+  gosec:
+    # Exclude specific rules if needed (e.g., G104 for unhandled errors, which errcheck already handles)
+    excludes:
+      - G104
+    # Security audit settings
+    severity: "medium"
+    confidence: "medium"
+
+  govet:
+    # Enable all conservative checks for vet
+    enable-all: true
+    disable:
+      - fieldalignment # Disable field alignment warnings unless micro-optimizing memory layout
+
+  revive:
+    # Modern replacement for golint with custom configurable rules
+    severity: warning
+    rules:
+      - name: exported
+        severity: warning
+      - name: indent-error-flow
+        severity: warning
+      - name: unused-parameter
+        severity: warning
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - hugeParam # Can be overly aggressive on medium-sized structs
+
+linters:
+  disable-all: true
+  enable:
+    # --- Code Formatting ---
+    - gofmt # Standard formatting check
+    - gofumpt # Enforces stricter formatting conventions than gofmt
+    - goimports # Ensures imports are formatted and ordered correctly
+
+    # --- Security & Vulnerabilities ---
+    - gosec # Inspects source code for security problems
+
+    # --- Bugs & Correctness ---
+    - govet # Examines Go source code and reports suspicious constructs
+    - errcheck # Checks for unhandled errors
+    - staticcheck # Comprehensive static analysis suite (Go standard team recommended)
+    - ineffassign # Detects assignments to variables that are never used
+    - typecheck # Standard Go type-checker
+    - bodyclose # Checks whether HTTP response bodies are closed correctly
+
+    # --- Code Quality & Performance ---
+    - revive # Fast, configurable drop-in replacement for golint
+    - gocritic # Provides diagnostics that check for bugs, performance, and style issues
+    - misspell # Finds commonly misspelled English words in comments and code
+    - unused # Checks for unused constants, variables, functions and types
+
+issues:
+  # Limit the number of issues per linter/file to keep CI reports readable
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+  # Exclude rules for unit test files where loose patterns (like unchecked errors) are standard
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - bodyclose
+
+  # Print all issue lines (helpful for GitHub Actions annotations)
+  new: false

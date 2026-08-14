@@ -1,0 +1,6 @@
+# <type>(<scope>): <short summary in imperative mood>
+#
+# Types: feat, fix, docs, style, refactor, perf, test, chore, ci
+# Example: feat(auth): add JWT middleware validation
+#
+# Explain WHY this change was made and WHAT problem it solves.
