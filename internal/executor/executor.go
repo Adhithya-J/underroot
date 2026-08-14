@@ -7,6 +7,7 @@ import (
 
 // ExecuteScript runs a PowerShell command and prints its output.
 func ExecuteScript(input string) (string, error) {
+	// #nosec G204 -- executing the validated PowerShell script is this package's purpose.
 	cmd := exec.Command("powershell", "-Command", input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
