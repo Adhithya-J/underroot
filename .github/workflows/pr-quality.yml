@@ -44,8 +44,8 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          # v1.61.0 is built with Go 1.23 and can read Go 1.23 export data.
-          version: v1.61.0
+          # v1.62.2 ships a Go 1.23-compatible binary required by this module.
+          version: v1.62.2
 
       - name: Scan for secrets with gitleaks
         uses: gitleaks/gitleaks-action@v2
