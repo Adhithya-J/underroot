@@ -20,6 +20,8 @@ jobs:
     name: Format, lint, test, and security scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GOTOOLCHAIN: local
 
     steps:
       - name: Check out source
@@ -30,8 +32,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Keep golangci-lint v1.62.2 and the project on the same Go toolchain.
+          go-version: '1.23.12'
           cache: true
+
+      - name: Verify Go toolchain
+        run: go version && go env GOVERSION GOROOT GOTOOLCHAIN
 
       - name: Run vulnerability check
         uses: golang/govulncheck-action@v1
