@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/Adhithya-J/underroot.git/internal/executor"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
@@ -12,7 +13,6 @@ const (
 )
 
 func main() {
-
 	app := NewApp() //  session starts with a fresh session state
 
 	ui.PrintBanner()
@@ -26,8 +26,10 @@ func main() {
 		app.Session.ErrorHistory = nil
 
 		txt, err := ui.ReadInput(app.Scanner)
-
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			ui.PrintError("User input read failed", err)
 			continue
 		}
@@ -41,7 +43,7 @@ func main() {
 		if ui.ShouldExit(app.Session.CurrentInput) {
 			break
 		}
-		var attemptStatus = false // this tracks whether user question is successfully answered after all retries
+		attemptStatus := false // this tracks whether user question is successfully answered after all retries
 		// depending on the value, what gets added to session state ctx varies
 		// previously, we were was only storing successful attempts, then realized, unsuccessful attempts will also be useful
 		// but what to store in unsuccessful attempts? - the error message, but how would you structure it, i haven't explore on that,
@@ -87,7 +89,7 @@ func main() {
 					ui.PrintError("Execution Error", err)
 					ui.PrintOutput(psOut)
 					app.Session.AddErrorHistory(AgentError{
-						ErrorType: "ExectionFailed",
+						ErrorType: "ExecutionFailed",
 						ErrorMsg:  err.Error(),
 						Script:    response.Script,
 						Output:    psOut,
@@ -126,10 +128,8 @@ func main() {
 				FinalScript:      "<could-not-be-generated>",
 				FinalOutput:      "",
 			})
-
 		}
 	}
 
 	ui.PrintLine()
-
 }

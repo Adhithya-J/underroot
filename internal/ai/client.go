@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -17,6 +18,7 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// ToolCall describes a tool requested by the AI.
 type ToolCall struct {
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args"`
@@ -38,17 +40,20 @@ type Config struct {
 	UseMock       bool
 }
 
+// Client communicates with the configured AI service.
 type Client struct {
 	config     Config
 	httpClient *http.Client
 	// systemPrompt Message
 }
 
+// ChatCompletionsRequest is the request payload for chat completions.
 type ChatCompletionsRequest struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
 }
 
+// ChatCompletionsResponse is the response payload from chat completions.
 type ChatCompletionsResponse struct {
 	Choices []struct {
 		Message struct {
@@ -60,6 +65,7 @@ type ChatCompletionsResponse struct {
 // client should not handle history!!!
 // think in terms of separation of concerns. each function should care about what it wants to do not about history of previous function calls
 
+// SystemPrompt returns the system instructions for the AI.
 func SystemPrompt() Message {
 	return Message{
 		Role: "system",
@@ -135,6 +141,7 @@ func SystemPrompt() Message {
 	}
 }
 
+// Validate checks that the client configuration is complete.
 func (cfg Config) Validate() error {
 	if cfg.UseMock {
 		return nil
@@ -151,11 +158,10 @@ func (cfg Config) Validate() error {
 		return errors.New("missing openai model")
 	}
 	return nil
-
 }
 
+// NewClient creates a client from the supplied configuration.
 func NewClient(cfg Config) (*Client, error) {
-
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -163,10 +169,12 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{
 		config: cfg,
 		httpClient: &http.Client{
-			Timeout: 240 * time.Second},
+			Timeout: 240 * time.Second,
+		},
 	}, nil
 }
 
+// ParseAgentJsonOutput parses an AI response into an AgentResponse.
 func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 	var agentResp AgentResponse
 
@@ -177,15 +185,18 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 		return nil, err
 	}
 	return &agentResp, nil
-
 }
 
+// OpenAIChat sends messages and returns the generated content.
 func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
-	// to be implemented
-
-	return "", nil
+	result, err := c.chat(ctx, message)
+	if err != nil {
+		return "", err
+	}
+	return result.Choices[0].Message.Content, nil
 }
 
+// BuildMessages prepends the system prompt to user messages.
 func BuildMessages(userInput []Message) []Message {
 	var result []Message
 	result = append(result, SystemPrompt())
@@ -193,8 +204,12 @@ func BuildMessages(userInput []Message) []Message {
 	return result
 }
 
+// MakeHTTPRequest sends a chat completion request.
 func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
+	return c.makeHTTPRequest(context.Background(), body)
+}
 
+func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsRequest) (*http.Response, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -210,7 +225,7 @@ func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, e
 
 	// Setting up request
 	req, err := http.NewRequestWithContext(
-		context.Background(),
+		ctx,
 		http.MethodPost,
 		endpoint,
 		bytes.NewBuffer(data),
@@ -225,11 +240,14 @@ func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, e
 	// Making HTTP Request
 	resp, err := c.httpClient.Do(req)
 	return resp, err
-
 }
 
+// Chat sends messages and decodes the completion response.
 func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
+	return c.chat(context.Background(), input)
+}
 
+func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsResponse, error) {
 	messages := BuildMessages(input)
 
 	body := ChatCompletionsRequest{
@@ -237,7 +255,7 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 		Messages: messages,
 	}
 
-	resp, err := c.MakeHTTPRequest(body)
+	resp, err := c.makeHTTPRequest(ctx, body)
 	if err != nil {
 		return &ChatCompletionsResponse{}, err
 	}
@@ -246,8 +264,8 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		// body, _ := io.ReadAll(resp.Body)
-		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result ChatCompletionsResponse
@@ -262,8 +280,12 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 	return &result, nil
 }
 
+// GetShellScript returns a shell script generated from the supplied messages.
 func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error) {
 	if c.config.UseMock {
+		if len(input) == 0 {
+			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
+		}
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input[len(input)-1].Content),
 			Explanation: "Mock response",

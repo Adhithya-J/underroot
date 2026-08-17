@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
+// Validate rejects scripts containing known dangerous commands.
 func Validate(script string) error {
-	disallowedKeywords := []string{ //"Remove-Item",
+	disallowedKeywords := []string{
 		"Invoke-Expression",
 		"Add-Type",
 		"-EncodedCommand",
@@ -14,7 +15,8 @@ func Validate(script string) error {
 		"Invoke-WebRequest",
 		"Net.WebClient",
 		"VirtualAlloc",
-		"CreateThread"}
+		"CreateThread",
+	}
 
 	lowerScript := strings.ToLower(script)
 
@@ -24,5 +26,4 @@ func Validate(script string) error {
 		}
 	}
 	return nil
-
 }

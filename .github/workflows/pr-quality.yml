@@ -20,6 +20,8 @@ jobs:
     name: Format, lint, test, and security scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      GOTOOLCHAIN: local
 
     steps:
       - name: Check out source
@@ -30,8 +32,12 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          # Keep the project on its declared Go toolchain.
+          go-version: '1.23.12'
           cache: true
+
+      - name: Verify Go toolchain
+        run: go version && go env GOVERSION GOROOT GOTOOLCHAIN
 
       - name: Run vulnerability check
         uses: golang/govulncheck-action@v1
@@ -42,9 +48,10 @@ jobs:
         run: go test -race -v -coverprofile=coverage.out ./...
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.60.3
+          # v2.9+ supports the Go 1.26 standard library installed on hosted runners.
+          version: v2.12
 
       - name: Scan for secrets with gitleaks
         uses: gitleaks/gitleaks-action@v2
