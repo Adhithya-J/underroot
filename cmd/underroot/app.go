@@ -23,12 +23,12 @@ type AgentError struct {
 }
 
 type Attempt struct {
-	AttemptNo    int        `json:"attempt_no"`
-	Explaination string     `json:"explaination,omitempty"`
-	Script       string     `json:"script,omitempty"`
-	Output       string     `json:"output,omitempty"`
-	Error        AgentError `json:"error,omitempty"`
-	Success      bool       `json:"success,omitempty"`
+	AttemptNo   int        `json:"attempt_no"`
+	Explanation string     `json:"explanation,omitempty"`
+	Script      string     `json:"script,omitempty"`
+	Output      string     `json:"output,omitempty"`
+	Error       AgentError `json:"error,omitempty"`
+	Success     bool       `json:"success,omitempty"`
 }
 
 type Interaction struct {
@@ -80,14 +80,13 @@ type App struct {
 
 func (s *Session) AddInteraction(interaction Interaction) {
 	s.History = append(s.History, interaction)
-
 }
 
-func (s *Session) AddErrorHistory(error AgentError) {
-	s.ErrorHistory = append(s.ErrorHistory, error)
+func (s *Session) AddErrorHistory(agentError AgentError) {
+	s.ErrorHistory = append(s.ErrorHistory, agentError)
 }
 
-func (s *Session) SetLastResponse(script string, explanation string) {
+func (s *Session) SetLastResponse(script, explanation string) {
 	if s.CurrentInteraction == nil {
 		s.CurrentInteraction = &Interaction{}
 	}
@@ -110,7 +109,6 @@ func (s *Session) SetOutput(psout string) {
 func UpdateWorkingDir(session *Session) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		// ui.PrintError("Failed to get cwd", err)
 		session.FolderName = "unknown"
 		session.ParentDir = "unknown"
 		session.CurrentDir = "unknown"
@@ -134,7 +132,6 @@ func UpdateWorkingDir(session *Session) {
 		prefix := "[File]"
 		if f.IsDir() {
 			prefix = "[Dir]"
-
 		}
 		content = append(content, fmt.Sprintf("%s %s", prefix, f.Name()))
 	}
@@ -150,11 +147,11 @@ func (s *Session) TotalTokens() int { // TODO: this is entirely wrong and unreli
 	// for now adding 250 tokens for that
 	systemPromptTokens := 250 // to be updated with actual count
 	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
-	for _, item := range s.History {
+	for i := range s.History {
+		item := &s.History[i]
 		total += EstimateTokens(item.UserInput + item.FinalScript + item.FinalExplanation + item.FinalOutput)
 	}
 	return total
-
 }
 
 func toJson(v any) string {
@@ -170,14 +167,14 @@ func GetCurrentDirInfo(session *Session) string {
 }
 
 func GetSessionHistory(session *Session) string {
-	// convo history should not include explaination when being fed into prompt
+	// Conversation history should not include explanation when being fed into prompt.
 	// tempSessionHistory := ""
 
 	return toJson(session.History)
 }
 
 func GetLatestError(session *Session) string {
-	// this should build error resoultion strategy (for now fixed) for llm based on error type
+	// This builds an error resolution strategy (currently fixed) for the LLM based on error type.
 	n := len(session.ErrorHistory)
 
 	// add gating so json parsing does not fail
@@ -199,7 +196,7 @@ func GetLatestError(session *Session) string {
 		errorCorrection = "Generate compliant and safe output."
 	case "RuleBasedValidationFailed":
 		errorCorrection = "Fix output so it satisfies validation rules."
-	case "ExectionFailed":
+	case "ExecutionFailed":
 		errorCorrection = "Fix execution/runtime issues."
 	default:
 		errorCorrection = "Analyze and fix the error."
@@ -237,7 +234,7 @@ func BuildPrompt(session *Session) ([]ai.Message, error) { // message 0 should b
 	// add to last user message
 	currentDirInfo := GetCurrentDirInfo(session)
 
-	// session history includes previous conversations - which inclues user input, explaination of generated script, script, ps output
+	// Session history includes previous conversations: user input, explanation of generated script, script, and PowerShell output.
 	sessionHistory := GetSessionHistory(session)
 
 	prompt = append(prompt, ai.Message{
@@ -281,5 +278,4 @@ func NewApp() *App {
 		Agent:   agent.NewAgent(client),
 		Scanner: bufio.NewReader(os.Stdin),
 	}
-
 }

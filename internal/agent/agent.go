@@ -9,6 +9,7 @@ import (
 	"github.com/Adhithya-J/underroot.git/internal/validator"
 )
 
+// Agent orchestrates AI responses and tool execution.
 type Agent struct {
 	aiClient *ai.Client
 }
@@ -21,20 +22,24 @@ type Agent struct {
 // A naive approach would be to use the entire error history
 // But I think when we run into an execution error, we can be sure that the script has passed the safety and validation error and those errors can be removed from error history
 
+// RunResult contains the validated result of an agent run.
 type RunResult struct {
 	Script      string
 	Explanation string
 	Success     bool
 }
 
+// NewAgent creates an agent using the provided AI client.
 func NewAgent(aiClient *ai.Client) *Agent {
 	return &Agent{
 		aiClient: aiClient,
 	}
 }
 
+// ToolFunc defines a callable tool implementation.
 type ToolFunc func(map[string]any) (string, error)
 
+// ExecuteTool executes the tool call returned by the AI.
 func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 	path, ok := tc.Args["path"].(string)
 	if !ok {
@@ -50,15 +55,13 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown tool: %s", tc.Name)
 	}
-
 }
 
+// Run generates, validates, and returns a safe shell script.
 func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	currentPrompt := initialInput
 	var resp *ai.AgentResponse
 	var err error
-	// var errType string
-
 	for i := 0; i < 5; i++ {
 		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
 		if err != nil {
@@ -104,5 +107,4 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		Explanation: resp.Explanation,
 		Success:     true,
 	}, "", nil
-
 }
