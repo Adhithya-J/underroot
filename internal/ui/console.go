@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"strings"
 	"unicode/utf8"
 
@@ -31,17 +32,20 @@ func terminalWidth() int {
 
 func ReadInput(reader *bufio.Reader) (string, error) {
 	txt, err := reader.ReadString('\n') // rune
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return "", err
 	}
-	return strings.TrimSpace(txt), err
+	if strings.TrimSpace(txt) == "" && err == io.EOF {
+		return "", io.EOF
+	}
+	return strings.TrimSpace(txt), nil
 
 }
 
 func AskForApproval(reader *bufio.Reader) (bool, error) {
 	fmt.Printf("%sDo you want to execute the script (Y/n): %s", Blue, Reset)
 	txt, err := reader.ReadString('\n') //single quotes!
-	if err != nil {
+	if err != nil && err != io.EOF {
 		return false, err
 	}
 	txt = strings.TrimSpace(txt)
@@ -107,8 +111,8 @@ func PrintOutput(output string) {
 	}
 
 	contentWidth := maxWidth + 2
-	if termW > contentWidth {
-		contentWidth = maxWidth - 2
+	if termW > 2 && contentWidth > termW-2 {
+		contentWidth = termW - 2
 	}
 	// borderWidth := max(termW-2, maxWidth+2)
 

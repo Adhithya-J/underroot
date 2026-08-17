@@ -88,6 +88,9 @@ func (s *Session) AddErrorHistory(error AgentError) {
 }
 
 func (s *Session) SetLastResponse(script string, explanation string) {
+	if s.CurrentInteraction == nil {
+		s.CurrentInteraction = &Interaction{}
+	}
 	s.CurrentInteraction.FinalScript = script
 	s.CurrentInteraction.FinalExplanation = explanation
 }
@@ -98,6 +101,9 @@ func (s *Session) ResetRequestState() {
 }
 
 func (s *Session) SetOutput(psout string) {
+	if s.CurrentInteraction == nil {
+		s.CurrentInteraction = &Interaction{}
+	}
 	s.CurrentInteraction.FinalOutput = psout
 }
 
@@ -119,9 +125,12 @@ func UpdateWorkingDir(session *Session) {
 		session.DirContent = "Error reading directory content"
 		return
 	}
-	const max_files = 10
+	const maxFiles = 10
 	var content []string
-	for _, f := range files[:max_files] {
+	if len(files) > maxFiles {
+		files = files[:maxFiles]
+	}
+	for _, f := range files {
 		prefix := "[File]"
 		if f.IsDir() {
 			prefix = "[Dir]"

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/Adhithya-J/underroot.git/internal/executor"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
@@ -28,6 +29,9 @@ func main() {
 		txt, err := ui.ReadInput(app.Scanner)
 
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			ui.PrintError("User input read failed", err)
 			continue
 		}

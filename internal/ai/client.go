@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -181,9 +182,11 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 }
 
 func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
-	// to be implemented
-
-	return "", nil
+	result, err := c.chat(ctx, message)
+	if err != nil {
+		return "", err
+	}
+	return result.Choices[0].Message.Content, nil
 }
 
 func BuildMessages(userInput []Message) []Message {
@@ -194,6 +197,10 @@ func BuildMessages(userInput []Message) []Message {
 }
 
 func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
+	return c.makeHTTPRequest(context.Background(), body)
+}
+
+func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsRequest) (*http.Response, error) {
 
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -210,7 +217,7 @@ func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, e
 
 	// Setting up request
 	req, err := http.NewRequestWithContext(
-		context.Background(),
+		ctx,
 		http.MethodPost,
 		endpoint,
 		bytes.NewBuffer(data),
@@ -229,6 +236,10 @@ func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, e
 }
 
 func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
+	return c.chat(context.Background(), input)
+}
+
+func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsResponse, error) {
 
 	messages := BuildMessages(input)
 
@@ -237,7 +248,7 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 		Messages: messages,
 	}
 
-	resp, err := c.MakeHTTPRequest(body)
+	resp, err := c.makeHTTPRequest(ctx, body)
 	if err != nil {
 		return &ChatCompletionsResponse{}, err
 	}
@@ -246,8 +257,8 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		// body, _ := io.ReadAll(resp.Body)
-		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var result ChatCompletionsResponse
@@ -264,6 +275,9 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 
 func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error) {
 	if c.config.UseMock {
+		if len(input) == 0 {
+			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
+		}
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock: %s'", input[len(input)-1].Content),
 			Explanation: "Mock response",
