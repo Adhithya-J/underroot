@@ -76,9 +76,9 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		}
 		if resp.ToolCall != nil {
 			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
-			result, err := a.ExecuteTool(resp.ToolCall)
-			if err != nil {
-				result = "Error : " + err.Error()
+			result, toolErr := a.ExecuteTool(resp.ToolCall)
+			if toolErr != nil {
+				result = "Error : " + toolErr.Error()
 			}
 			// Keep the result in the existing request, but explicitly close the
 			// discovery phase. Small models otherwise tend to repeat the same
