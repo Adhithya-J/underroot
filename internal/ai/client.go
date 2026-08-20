@@ -33,6 +33,28 @@ type AgentResponse struct {
 	IsSafe      bool      `json:"is_safe"`
 }
 
+type DiscoveryQuestion struct {
+	ID       string `json:"id"`
+	Question string `json:"question"`
+	Required bool   `json:"required"`
+}
+
+type DiscoveryPlan struct {
+	Questions []DiscoveryQuestion `json:"questions"`
+}
+
+type DiscoveryAction struct {
+	ToolCall *ToolCall `json:"tool_call,omitempty"`
+	Answer   string    `json:"answer,omitempty"`
+	Done     bool      `json:"done"`
+}
+
+type DiscoveryAnswer struct {
+	Status string `json:"status"`
+	Value  string `json:"value,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
 // Config holds the application configuration.
 type Config struct {
 	OpenAIAPIKey  string
@@ -171,6 +193,29 @@ FINAL SCRIPT MODE
   explanation if the request cannot be completed safely.
 - Set is_safe=false for unsafe or insufficiently confirmed actions.`,
 	}
+}
+
+func DiscoveryPlanPrompt() Message {
+	return Message{Role: "system", Content: `You are a filesystem discovery planner.
+Return only JSON: {"questions":[{"id":"string","question":"string","required":true}]}.
+Identify the minimum facts required to complete the user's task. Do not call tools,
+generate PowerShell, guess paths, or include explanations outside JSON.`}
+}
+
+func DiscoveryActionPrompt() Message {
+	return Message{Role: "system", Content: `You are a filesystem discovery assistant.
+Return only JSON matching:
+{"tool_call":{"name":"tool_name","args":{}},"answer":"","done":false}
+or {"tool_call":null,"answer":"...","done":true}.
+For the current question, either choose exactly one focused tool call or answer
+from confirmed facts. Never generate PowerShell. Never use list_dir when exists,
+find_entry, or find_file can answer the question.`}
+}
+
+func DiscoveryAnswerPrompt() Message {
+	return Message{Role: "system", Content: `You interpret one filesystem tool result.
+Return only JSON: {"status":"confirmed|missing|unknown","value":"","reason":""}.
+Do not guess. Use confirmed values only; if the result is insufficient, use unknown.`}
 }
 
 // Validate checks that the client configuration is complete.
@@ -383,4 +428,42 @@ func (c *Client) GetFinalScript(input []Message) (*AgentResponse, string, error)
 		return &AgentResponse{}, "", err
 	}
 	return output, "", nil
+}
+
+func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
+	result, err := c.chatWithSystem(context.Background(), DiscoveryPlanPrompt(), input)
+	if err != nil {
+		return nil, err
+	}
+	var plan DiscoveryPlan
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &plan); err != nil {
+		return nil, fmt.Errorf("invalid discovery plan: %w", err)
+	}
+	return &plan, nil
+}
+
+func (c *Client) GetDiscoveryAction(question string, state string) (*DiscoveryAction, error) {
+	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s", question, state)}}
+	result, err := c.chatWithSystem(context.Background(), DiscoveryActionPrompt(), input)
+	if err != nil {
+		return nil, err
+	}
+	var action DiscoveryAction
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &action); err != nil {
+		return nil, fmt.Errorf("invalid discovery action: %w", err)
+	}
+	return &action, nil
+}
+
+func (c *Client) GetDiscoveryAnswer(question, toolResult, state string) (*DiscoveryAnswer, error) {
+	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s\n\nTOOL RESULT:\n%s", question, state, toolResult)}}
+	result, err := c.chatWithSystem(context.Background(), DiscoveryAnswerPrompt(), input)
+	if err != nil {
+		return nil, err
+	}
+	var answer DiscoveryAnswer
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &answer); err != nil {
+		return nil, fmt.Errorf("invalid discovery answer: %w", err)
+	}
+	return &answer, nil
 }

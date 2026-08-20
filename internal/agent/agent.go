@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/ai"
 	"github.com/Adhithya-J/underroot.git/internal/executor"
@@ -88,78 +89,64 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 
 // Run generates, validates, and returns a safe shell script.
 func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
-	currentPrompt := initialInput
-	var resp *ai.AgentResponse
-	var err error
-	toolCalls := 0
-	forceFinal := false
-	for i := 0; i < 5; i++ {
-		if forceFinal {
-			resp, _, err = a.aiClient.GetFinalScript(currentPrompt)
-		} else {
-			resp, _, err = a.aiClient.GetShellScript(currentPrompt)
-		}
-		if err != nil {
-			// A malformed response is an internal LLM formatting failure. Retry
-			// the same request with a correction hint instead of immediately
-			// surfacing it as a user-visible agent failure.
-			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(
-				"\n\nINTERNAL RESPONSE FORMAT ERROR:\n%s\nReturn only valid JSON matching the required schema. Do not use Markdown fences.",
-				err,
-			)
-			continue
-		}
-		if resp.ToolCall != nil {
-			if forceFinal {
-				return nil, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
+	if len(initialInput) == 0 {
+		return nil, "AIGenerationFailed", fmt.Errorf("empty agent input")
+	}
+	plan, err := a.aiClient.GetDiscoveryPlan(initialInput)
+	if err != nil {
+		return nil, "AIGenerationFailed", err
+	}
+	if len(plan.Questions) > maxDiscoveryToolCalls {
+		plan.Questions = plan.Questions[:maxDiscoveryToolCalls]
+	}
+
+	state := "No facts confirmed."
+	for _, question := range plan.Questions {
+		var answer *ai.DiscoveryAnswer
+		for attempt := 0; attempt < 2; attempt++ {
+			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
+			if actionErr != nil {
+				return nil, "AIGenerationFailed", actionErr
+			}
+			if action.ToolCall == nil {
+				state = fmt.Sprintf("%s\n- %s [confirmed]: %s", state, question.ID, action.Answer)
+				answer = &ai.DiscoveryAnswer{Status: "confirmed", Value: action.Answer}
+				break
 			}
 
-			toolCalls++
-			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
-			result, toolErr := a.ExecuteTool(resp.ToolCall)
+			ui.PrintGray("Tool Call: " + action.ToolCall.Name)
+			result, toolErr := a.ExecuteTool(action.ToolCall)
 			if toolErr != nil {
-				result = fmt.Sprintf("TOOL_ERROR: %s", toolErr.Error())
+				result = "TOOL_ERROR: " + toolErr.Error()
 			}
-			// Keep the result in the existing request. A failed discovery call is
-			// not completion: the model must be allowed to choose another path or
-			// another discovery tool.
-			if toolCalls >= maxDiscoveryToolCalls {
-				forceFinal = true
+			answer, err = a.aiClient.GetDiscoveryAnswer(question.Question, result, state)
+			if err != nil {
+				return nil, "AIGenerationFailed", err
 			}
-			instruction := `Interpret this result before continuing. If the path is missing or the tool
-failed, do not repeat the same call: inspect the appropriate parent directory
-or try a corrected path. You may call another tool. Return a PowerShell
-script only after all required paths and files have been confirmed.`
-			if forceFinal {
-				instruction = `Discovery budget reached. The next request will use the final script generator.
-Summarize only the confirmed paths and files needed for the final script.`
+			state = fmt.Sprintf("%s\n- %s [%s]: %s", state, question.ID, answer.Status, answer.Value)
+			if answer.Status != "unknown" {
+				break
 			}
-			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(`
-
-TOOL RESULT (%s)
-%s
-
-%s`, resp.ToolCall.Name, result, instruction)
-
 		}
-
-		if resp.ToolCall == nil {
-			break
+		if answer == nil {
+			state += fmt.Sprintf("\n- %s [unknown]: could not confirm", question.ID)
 		}
-
 	}
 
-	// Do not allow the last tool request to fall through as an empty or stale
-	// script. Return a retryable generation error instead.
-	if resp != nil && resp.ToolCall != nil {
-		return nil, "AIGenerationFailed", fmt.Errorf("AI exhausted tool-call retries without generating a script")
+	task := initialInput[len(initialInput)-1].Content
+	if marker := strings.Index(task, "\n\tENVIRONMENT"); marker >= 0 {
+		task = task[:marker]
 	}
-
-	if err != nil || resp == nil {
-		if err == nil {
-			err = fmt.Errorf("no response generated")
-		}
-		return nil, "AIGenerationFailed", fmt.Errorf("AI generation failed after internal retries: %v", err)
+	if marker := strings.Index(task, "\nENVIRONMENT"); marker >= 0 {
+		task = task[:marker]
+	}
+	finalInput := []ai.Message{{Role: "user", Content: fmt.Sprintf("TASK:\n%s\n\nDISCOVERY STATE:\n%s\n\nGenerate the final script only from confirmed facts. Treat unknown facts as unavailable.", task, state)}}
+	resp, _, err := a.aiClient.GetFinalScript(finalInput)
+	if err != nil {
+		return nil, "AIGenerationFailed", err
+	}
+	if resp.ToolCall != nil {
+		return nil, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
 	}
 
 	if resp.Script == "" {
