@@ -80,7 +80,16 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			if err != nil {
 				result = "Error : " + err.Error()
 			}
-			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf("\n\nTool Result (%s):\n%s", resp.ToolCall.Name, result)
+			// Keep the result in the existing request, but explicitly close the
+			// discovery phase. Small models otherwise tend to repeat the same
+			// tool call because the original task remains the most salient text.
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(`
+
+TOOL RESULT (%s)
+%s
+
+DISCOVERY COMPLETE. Do not call any tool again. Return only the final
+PowerShell command in the script field, with tool_call set to null.`, resp.ToolCall.Name, result)
 
 		}
 

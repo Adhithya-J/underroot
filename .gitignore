@@ -24,6 +24,7 @@ profile.cov
 go.work
 go.work.sum
 .gocache
+.gocache-test/
 
 # env file
 .env
