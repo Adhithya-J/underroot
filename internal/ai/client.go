@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -118,6 +119,8 @@ func SystemPrompt() Message {
 		  - exists
 		- Only generate a script after confirming paths.
 		- If a tool is used, leave script empty until discovery is complete.
+		- Internal tools are not PowerShell commands. Never put exists, list_dir, or read_file in the script field.
+		- For a directory listing, use Get-ChildItem -Path 'path'. Do not combine switches with commas, such as -File,Directory.
 
 		5. Repair Behavior
 		- If a previous execution failed:
@@ -176,13 +179,27 @@ func NewClient(cfg Config) (*Client, error) {
 
 // ParseAgentJsonOutput parses an AI response into an AgentResponse.
 func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+	input = strings.TrimSpace(input)
+	if strings.HasPrefix(input, "```") {
+		// Small models sometimes wrap otherwise valid JSON in a Markdown
+		// code fence despite the system prompt asking for raw JSON.
+		lines := strings.Split(input, "\n")
+		if len(lines) >= 2 {
+			lines = lines[1:]
+			if last := len(lines) - 1; strings.TrimSpace(lines[last]) == "```" {
+				lines = lines[:last]
+			}
+			input = strings.TrimSpace(strings.Join(lines, "\n"))
+		}
+	}
+
 	var agentResp AgentResponse
 
 	if err := json.Unmarshal(
 		[]byte(input),
 		&agentResp,
 	); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid AI JSON: %w", err)
 	}
 	return &agentResp, nil
 }

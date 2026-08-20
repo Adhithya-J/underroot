@@ -65,16 +65,31 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	for i := 0; i < 5; i++ {
 		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
 		if err != nil {
-			errMsg := fmt.Errorf("AI generation failed: %v", err)
-			return nil, "AIGenerationFailed", errMsg
+			// A malformed response is an internal LLM formatting failure. Retry
+			// the same request with a correction hint instead of immediately
+			// surfacing it as a user-visible agent failure.
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(
+				"\n\nINTERNAL RESPONSE FORMAT ERROR:\n%s\nReturn only valid JSON matching the required schema. Do not use Markdown fences.",
+				err,
+			)
+			continue
 		}
 		if resp.ToolCall != nil {
 			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
-			result, err := a.ExecuteTool(resp.ToolCall)
-			if err != nil {
-				result = "Error : " + err.Error()
+			result, toolErr := a.ExecuteTool(resp.ToolCall)
+			if toolErr != nil {
+				result = "Error : " + toolErr.Error()
 			}
-			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf("\n\nTool Result (%s):\n%s", resp.ToolCall.Name, result)
+			// Keep the result in the existing request, but explicitly close the
+			// discovery phase. Small models otherwise tend to repeat the same
+			// tool call because the original task remains the most salient text.
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(`
+
+TOOL RESULT (%s)
+%s
+
+DISCOVERY COMPLETE. Do not call any tool again. Return only the final
+PowerShell command in the script field, with tool_call set to null.`, resp.ToolCall.Name, result)
 
 		}
 
@@ -82,6 +97,19 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			break
 		}
 
+	}
+
+	// Do not allow the last tool request to fall through as an empty or stale
+	// script. Return a retryable generation error instead.
+	if resp != nil && resp.ToolCall != nil {
+		return nil, "AIGenerationFailed", fmt.Errorf("AI exhausted tool-call retries without generating a script")
+	}
+
+	if err != nil || resp == nil {
+		if err == nil {
+			err = fmt.Errorf("no response generated")
+		}
+		return nil, "AIGenerationFailed", fmt.Errorf("AI generation failed after internal retries: %v", err)
 	}
 
 	if resp.Script == "" {
