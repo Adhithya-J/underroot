@@ -51,14 +51,20 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		}
 		return value, nil
 	}
-	path, err := stringArg("path")
-	if err != nil {
-		return "", err
-	}
 	switch tc.Name {
+	case "user_downloads":
+		return executor.UserDownloads()
 	case "list_dir":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
 		return executor.List_Dir(path) // Or executor directly if bypassing validator
 	case "find_entry":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
 		name, err := stringArg("name")
 		if err != nil {
 			return "", err
@@ -68,7 +74,29 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 			entryType = "any"
 		}
 		return executor.Find_Entry(path, name, entryType)
+	case "search_entries":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
+		query, err := stringArg("query")
+		if err != nil {
+			return "", err
+		}
+		entryType, _ := tc.Args["type"].(string)
+		if entryType == "" {
+			entryType = "any"
+		}
+		limit := 20
+		if value, ok := tc.Args["limit"].(float64); ok {
+			limit = int(value)
+		}
+		return executor.Search_Entries(path, query, entryType, limit)
 	case "find_file":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
 		extension, err := stringArg("extension")
 		if err != nil {
 			return "", err
@@ -79,8 +107,16 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		}
 		return executor.Find_File(path, extension, limit)
 	case "read_file":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
 		return executor.Read_File(path)
 	case "exists":
+		path, err := stringArg("path")
+		if err != nil {
+			return "", err
+		}
 		return executor.Exists(path)
 	default:
 		return "", fmt.Errorf("unknown tool: %s", tc.Name)
@@ -100,7 +136,10 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		plan.Questions = plan.Questions[:maxDiscoveryToolCalls]
 	}
 
-	state := "No facts confirmed."
+	// Discovery actions are generated in separate model calls. Preserve the
+	// environment captured in the original request so they can inspect the
+	// correct parent or ancestor instead of inventing a path.
+	state := fmt.Sprintf("REQUEST CONTEXT:\n%s\n\nNo facts confirmed.", initialInput[len(initialInput)-1].Content)
 	for _, question := range plan.Questions {
 		for attempt := 0; attempt < 2; attempt++ {
 			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)

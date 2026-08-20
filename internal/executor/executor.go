@@ -87,6 +87,40 @@ func Find_Entry(path, name, entryType string) (string, error) {
 		quoteJSON(path), quoteJSON(name))), nil
 }
 
+// Search_Entries returns a bounded set of direct children whose names contain
+// query, ignoring case. It is intended to resolve a user-provided name hint;
+// callers must use the returned full_name rather than assume the hint is exact.
+func Search_Entries(path, query, entryType string, limit int) (string, error) {
+	if entryType != "" && entryType != "file" && entryType != "directory" && entryType != "any" {
+		return "", fmt.Errorf("type must be file, directory, or any")
+	}
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	if limit <= 0 || limit > maxDirectoryEntries {
+		limit = maxDirectoryEntries
+	}
+
+	typeFilter := "$true"
+	if entryType == "file" {
+		typeFilter = "(-not $_.PSIsContainer)"
+	} else if entryType == "directory" {
+		typeFilter = "$_.PSIsContainer"
+	}
+
+	script := fmt.Sprintf(`$query = %s
+$items = @(Get-ChildItem -LiteralPath %s -ErrorAction Stop | Where-Object { %s -and $_.Name.IndexOf($query, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First %d)
+$entries = @($items | ForEach-Object { [pscustomobject]@{ name = $_.Name; directory = $_.PSIsContainer; full_name = $_.FullName } })
+[pscustomobject]@{ path = %s; query = $query; entries = $entries; shown = $entries.Count } | ConvertTo-Json -Compress -Depth 3`,
+		quotePowerShellPath(query), quotePowerShellPath(path), typeFilter, limit, quotePowerShellPath(path))
+	result, err := ExecuteScript(script)
+	if err != nil {
+		return result, err
+	}
+	return capToolResult(result, fmt.Sprintf(`{"path":%s,"query":%s,"entries":[],"shown":0,"truncated":true,"message":"result exceeded the tool output budget"}`,
+		quoteJSON(path), quoteJSON(query))), nil
+}
+
 // Find_File finds a bounded number of files matching an extension directly
 // under path. It deliberately does not recurse unless that becomes explicit
 // in a future tool contract.
@@ -128,6 +162,17 @@ func Exists(path string) (string, error) {
 		"$p = %s; [pscustomobject]@{ path = $p; exists = Test-Path -LiteralPath $p -PathType Any } | ConvertTo-Json -Compress",
 		quotePowerShellPath(path),
 	)
+	return ExecuteScript(script)
+}
+
+// UserDownloads returns the current Windows user's Downloads directory. It is
+// resolved from USERPROFILE at execution time rather than guessed from the
+// agent's working directory.
+func UserDownloads() (string, error) {
+	script := `$profile = $env:USERPROFILE
+if ([string]::IsNullOrWhiteSpace($profile)) { throw 'USERPROFILE is not available' }
+$downloads = Join-Path -Path $profile -ChildPath 'Downloads'
+[pscustomobject]@{ path = $downloads; exists = (Test-Path -LiteralPath $downloads -PathType Container) } | ConvertTo-Json -Compress`
 	return ExecuteScript(script)
 }
 

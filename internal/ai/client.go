@@ -166,6 +166,16 @@ func SystemPrompt() Message {
 		3. find_file({"path":"string","extension":"string","limit":number}) - Finds a bounded number of matching files directly in a directory.
 		4. exists({"path":"string"}) - Checks if a path exists.
 		5. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
+		6. search_entries({"path":"string","query":"string","type":"file|directory|any","limit":number})
+		   - Finds direct child names containing query, ignoring case.
+		7. user_downloads({}) - Returns the current user's standard Downloads folder.
+		   Use this only when the user explicitly says their standard/personal
+		   Downloads location. A generic named "downloads folder" must be found
+		   from the supplied working-directory environment instead.
+		- Treat every name supplied by the user as an untrusted search hint. The
+		  filesystem tool result is the only source of truth for paths. Use
+		  search_entries for partial names or likely spelling mistakes; do not
+		  construct a path from a user-provided name unless a tool confirmed it.
 
 		Workflow
 		1. Use the smallest number of focused tools possible. The application
@@ -202,9 +212,12 @@ FINAL SCRIPT MODE
 - Opening a confirmed image with Start-Process is a benign, non-destructive
   action. It may be marked safe when the image path was confirmed by tools.
 - Opening a local folder or image is safe. A script may resolve the current
-  user's Downloads folder dynamically from the UserProfile special folder and
+  user's Downloads folder dynamically from the USERPROFILE environment value and
   check whether it and an image exist before opening anything; that is not
   guessing a path and is safe.
+- If a required folder or image is absent, the script must terminate with
+  throw (not Write-Host or Write-Warning) so the application can retry with
+  the actual failure.
 - Set is_safe=false for unsafe or insufficiently confirmed actions.`,
 	}
 }
@@ -224,8 +237,12 @@ Return only JSON matching:
 {"tool_call":{"name":"tool_name","args":{}},"answer":"","done":false}
 or {"tool_call":null,"answer":"...","done":true}.
 For the current question, either choose exactly one focused tool call or answer
-from confirmed facts. Never generate PowerShell. Never use list_dir when exists,
-find_entry, or find_file can answer the question.`}
+from confirmed facts. Never generate PowerShell. Use user_downloads with {} only
+for an explicit personal/standard Downloads request. For a generic named folder,
+use the working-directory context to inspect its parent or ancestors. Never use
+list_dir when exists, find_entry, find_file, or search_entries can answer the
+question. User-supplied names are hints only: use search_entries for partial or
+possibly misspelled names, and treat the filesystem result as authoritative.`}
 }
 
 func DiscoveryAnswerPrompt() Message {

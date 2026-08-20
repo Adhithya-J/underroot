@@ -2,6 +2,8 @@ package executor
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -20,5 +22,32 @@ func TestExistsReturnsStructuredMissingPath(t *testing.T) {
 	}
 	if response.Exists {
 		t.Fatalf("Exists reported a missing path as existing: %q", response.Path)
+	}
+}
+
+func TestSearchEntriesMatchesPartialNameIgnoringCase(t *testing.T) {
+	dir := t.TempDir()
+	name := "DownLoads FolDer"
+	if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Search_Entries(dir, "downloads folder", "directory", 10)
+	if err != nil {
+		t.Fatalf("Search_Entries returned an error: %v", err)
+	}
+
+	var response struct {
+		Entries []struct {
+			Name      string `json:"name"`
+			Directory bool   `json:"directory"`
+			FullName  string `json:"full_name"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal([]byte(result), &response); err != nil {
+		t.Fatalf("Search_Entries returned invalid JSON %q: %v", result, err)
+	}
+	if len(response.Entries) != 1 || response.Entries[0].Name != name || !response.Entries[0].Directory {
+		t.Fatalf("unexpected search result: %s", result)
 	}
 }
