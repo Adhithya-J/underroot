@@ -41,13 +41,40 @@ type ToolFunc func(map[string]any) (string, error)
 
 // ExecuteTool executes the tool call returned by the AI.
 func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
-	path, ok := tc.Args["path"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing 'path' argument")
+	stringArg := func(name string) (string, error) {
+		value, ok := tc.Args[name].(string)
+		if !ok || value == "" {
+			return "", fmt.Errorf("missing '%s' argument", name)
+		}
+		return value, nil
+	}
+	path, err := stringArg("path")
+	if err != nil {
+		return "", err
 	}
 	switch tc.Name {
 	case "list_dir":
 		return executor.List_Dir(path) // Or executor directly if bypassing validator
+	case "find_entry":
+		name, err := stringArg("name")
+		if err != nil {
+			return "", err
+		}
+		entryType, _ := tc.Args["type"].(string)
+		if entryType == "" {
+			entryType = "any"
+		}
+		return executor.Find_Entry(path, name, entryType)
+	case "find_file":
+		extension, err := stringArg("extension")
+		if err != nil {
+			return "", err
+		}
+		limit := 20
+		if value, ok := tc.Args["limit"].(float64); ok {
+			limit = int(value)
+		}
+		return executor.Find_File(path, extension, limit)
 	case "read_file":
 		return executor.Read_File(path)
 	case "exists":

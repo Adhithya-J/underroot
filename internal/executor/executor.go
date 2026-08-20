@@ -46,14 +46,60 @@ $entries = @($items | Select-Object -First %d | ForEach-Object {
 	if err != nil {
 		return result, err
 	}
-	if len(result) <= maxToolResultBytes {
-		return result, nil
+	return capToolResult(result, fmt.Sprintf(`{"path":%s,"entries":[],"shown":0,"truncated":true,"message":"directory result exceeded the tool output budget; use a narrower query"}`,
+		quoteJSON(path))), nil
+}
+
+// Find_Entry finds one exact-name child entry of the supplied directory.
+func Find_Entry(path, name, entryType string) (string, error) {
+	if entryType != "" && entryType != "file" && entryType != "directory" && entryType != "any" {
+		return "", fmt.Errorf("type must be file, directory, or any")
 	}
 
-	// Keep oversized tool output valid and small. The model can retry with a
-	// narrower path or filter instead of receiving a malformed JSON fragment.
-	return fmt.Sprintf(`{"path":%s,"entries":[],"shown":0,"truncated":true,"message":"directory result exceeded the tool output budget; use a narrower query"}`,
-		quoteJSON(path)), nil
+	typeFilter := "$true"
+	if entryType == "file" {
+		typeFilter = "(-not $_.PSIsContainer)"
+	} else if entryType == "directory" {
+		typeFilter = "$_.PSIsContainer"
+	}
+
+	script := fmt.Sprintf(`$item = @(Get-ChildItem -LiteralPath %s -ErrorAction Stop | Where-Object { $_.Name -ceq %s -and %s } | Select-Object -First 1)
+[pscustomobject]@{ path = %s; name = %s; type = %s; found = ($item.Count -gt 0); full_name = if ($item.Count -gt 0) { $item[0].FullName } else { $null } } | ConvertTo-Json -Compress`,
+		quotePowerShellPath(path), quotePowerShellPath(name), typeFilter,
+		quotePowerShellPath(path), quotePowerShellPath(name), quotePowerShellPath(entryType))
+	result, err := ExecuteScript(script)
+	if err != nil {
+		return result, err
+	}
+	return capToolResult(result, fmt.Sprintf(`{"path":%s,"name":%s,"found":false,"message":"result exceeded the tool output budget"}`,
+		quoteJSON(path), quoteJSON(name))), nil
+}
+
+// Find_File finds a bounded number of files matching an extension directly
+// under path. It deliberately does not recurse unless that becomes explicit
+// in a future tool contract.
+func Find_File(path, extension string, limit int) (string, error) {
+	if limit <= 0 || limit > maxDirectoryEntries {
+		limit = maxDirectoryEntries
+	}
+	if extension == "" {
+		return "", fmt.Errorf("extension is required")
+	}
+	if !strings.HasPrefix(extension, ".") {
+		extension = "." + extension
+	}
+
+	script := fmt.Sprintf(`$items = @(Get-ChildItem -LiteralPath %s -File -ErrorAction Stop | Where-Object { $_.Extension -ieq %s } | Select-Object -First %d)
+$files = @($items | ForEach-Object { [pscustomobject]@{ name = $_.Name; full_name = $_.FullName; length = $_.Length } })
+[pscustomobject]@{ path = %s; extension = %s; files = $files; shown = $files.Count } | ConvertTo-Json -Compress -Depth 3`,
+		quotePowerShellPath(path), quotePowerShellPath(extension), limit,
+		quotePowerShellPath(path), quotePowerShellPath(extension))
+	result, err := ExecuteScript(script)
+	if err != nil {
+		return result, err
+	}
+	return capToolResult(result, fmt.Sprintf(`{"path":%s,"files":[],"shown":0,"truncated":true,"message":"result exceeded the tool output budget"}`,
+		quoteJSON(path))), nil
 }
 
 // Read_File reads the first 1000 characters of a file.
@@ -75,4 +121,11 @@ func Exists(path string) (string, error) {
 
 func quoteJSON(value string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", `\r`, "\n", `\n`).Replace(value) + `"`
+}
+
+func capToolResult(result, fallback string) string {
+	if len(result) <= maxToolResultBytes {
+		return result
+	}
+	return fallback
 }

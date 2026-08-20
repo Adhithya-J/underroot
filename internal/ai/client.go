@@ -124,6 +124,7 @@ func SystemPrompt() Message {
 		- Only generate a script after confirming paths.
 		- If a tool is used, leave script empty until discovery is complete.
 		- Internal tools are not PowerShell commands. Never put exists, list_dir, or read_file in the script field.
+		- Internal tools are not PowerShell commands. Never put tool names in the script field.
 		- For a directory listing, use Get-ChildItem -Path 'path'. Do not combine switches with commas, such as -File,Directory.
 
 		5. Repair Behavior
@@ -134,8 +135,10 @@ func SystemPrompt() Message {
 
 		Available Tools
 		1. list_dir({"path":"string"}) - Lists contents of a directory.
-		2. exists({"path":"string"}) - Checks if a path exists.
-		3. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
+		2. find_entry({"path":"string","name":"string","type":"file|directory|any"}) - Finds one exact-name child entry.
+		3. find_file({"path":"string","extension":"string","limit":number}) - Finds a bounded number of matching files directly in a directory.
+		4. exists({"path":"string"}) - Checks if a path exists.
+		5. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
 
 		Workflow
 		1. Use tools if more information is required.
