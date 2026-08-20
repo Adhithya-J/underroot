@@ -57,7 +57,9 @@ func main() {
 			input, err := BuildPrompt(app.Session) // what is fed into llm prompt? a structured version of conversation history with suggested fix for errors
 			if err != nil {
 				ui.PrintError("Error parsing json", err)
+				break
 			}
+			ui.PrintGray(fmt.Sprintf("Request context: %d/4096 estimated tokens", EstimatePromptTokens(input)))
 			ui.PrintGray("Generating response...")
 			response, errType, runErr := app.Agent.Run(input) // what does this do?
 			if runErr != nil {

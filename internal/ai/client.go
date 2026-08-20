@@ -70,6 +70,8 @@ type Client struct {
 	// systemPrompt Message
 }
 
+const chatTransportAttempts = 2
+
 // ChatCompletionsRequest is the request payload for chat completions.
 type ChatCompletionsRequest struct {
 	Model    string    `json:"model"`
@@ -186,11 +188,23 @@ func FinalSystemPrompt() Message {
 
 FINAL SCRIPT MODE
 - Do not request or call any tool.
-- Return only valid JSON matching the required schema.
+- Return only valid JSON in exactly this shape:
+  {"tool_call":null,"script":"powershell script","explanation":"short description","is_safe":true}
+- All four keys are required. is_safe must be the JSON boolean true for every
+  safe script; do not omit it.
 - Set tool_call to null.
 - Use the confirmed environment and tool results in the user message.
-- Return a minimal safe PowerShell script, or an empty script with an
-  explanation if the request cannot be completed safely.
+- For a request that can be completed safely, script MUST contain a minimal
+  executable PowerShell script. Never return an empty script for a safe
+  request.
+- If the request cannot be completed safely, set is_safe=false and explain
+  why. Do not return a placeholder, an empty script, or a tool call.
+- Opening a confirmed image with Start-Process is a benign, non-destructive
+  action. It may be marked safe when the image path was confirmed by tools.
+- Opening a local folder or image is safe. A script may resolve the current
+  user's Downloads folder dynamically from the UserProfile special folder and
+  check whether it and an image exist before opening anything; that is not
+  guessing a path and is safe.
 - Set is_safe=false for unsafe or insufficiently confirmed actions.`,
 	}
 }
@@ -198,8 +212,10 @@ FINAL SCRIPT MODE
 func DiscoveryPlanPrompt() Message {
 	return Message{Role: "system", Content: `You are a filesystem discovery planner.
 Return only JSON: {"questions":[{"id":"string","question":"string","required":true}]}.
-Identify the minimum facts required to complete the user's task. Do not call tools,
-generate PowerShell, guess paths, or include explanations outside JSON.`}
+Identify the minimum facts required to complete the user's task. Always return
+at least one question when the task refers to an unknown file, folder, or path.
+Do not call tools, generate PowerShell, guess paths, or include explanations
+outside JSON.`}
 }
 
 func DiscoveryActionPrompt() Message {
@@ -267,6 +283,10 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 		}
 	}
 
+	if input == "" {
+		return nil, errors.New("AI returned an empty response body")
+	}
+
 	var agentResp AgentResponse
 
 	if err := json.Unmarshal(
@@ -318,23 +338,35 @@ func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsReques
 		return nil, err
 	}
 
-	// Setting up request
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		endpoint,
-		bytes.NewBuffer(data),
-	)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < chatTransportAttempts; attempt++ {
+		// A request body cannot be reused after a failed HTTP attempt, so create a
+		// fresh request for the retry. Chat-completion requests are safe to retry:
+		// they have no side effects outside the local model server.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt+1 < chatTransportAttempts {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
 	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	// Making HTTP Request
-	resp, err := c.httpClient.Do(req)
-	return resp, err
+	return nil, fmt.Errorf("chat completion request failed after %d attempts: %w", chatTransportAttempts, lastErr)
 }
 
 // Chat sends messages and decodes the completion response.
@@ -375,6 +407,9 @@ func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Mes
 
 	if len(result.Choices) == 0 {
 		return &ChatCompletionsResponse{}, fmt.Errorf("empty response")
+	}
+	if strings.TrimSpace(result.Choices[0].Message.Content) == "" {
+		return &ChatCompletionsResponse{}, fmt.Errorf("empty completion content")
 	}
 	return &result, nil
 }
@@ -438,6 +473,14 @@ func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	var plan DiscoveryPlan
 	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &plan); err != nil {
 		return nil, fmt.Errorf("invalid discovery plan: %w", err)
+	}
+	if len(plan.Questions) == 0 {
+		return nil, errors.New("discovery plan contained no questions")
+	}
+	for _, question := range plan.Questions {
+		if question.ID == "" || question.Question == "" {
+			return nil, errors.New("discovery plan contained an incomplete question")
+		}
 	}
 	return &plan, nil
 }

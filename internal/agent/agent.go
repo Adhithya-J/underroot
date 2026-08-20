@@ -102,7 +102,6 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 
 	state := "No facts confirmed."
 	for _, question := range plan.Questions {
-		var answer *ai.DiscoveryAnswer
 		for attempt := 0; attempt < 2; attempt++ {
 			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
 			if actionErr != nil {
@@ -110,7 +109,6 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			}
 			if action.ToolCall == nil {
 				state = fmt.Sprintf("%s\n- %s [confirmed]: %s", state, question.ID, action.Answer)
-				answer = &ai.DiscoveryAnswer{Status: "confirmed", Value: action.Answer}
 				break
 			}
 
@@ -119,17 +117,11 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			if toolErr != nil {
 				result = "TOOL_ERROR: " + toolErr.Error()
 			}
-			answer, err = a.aiClient.GetDiscoveryAnswer(question.Question, result, state)
-			if err != nil {
-				return nil, "AIGenerationFailed", err
-			}
-			state = fmt.Sprintf("%s\n- %s [%s]: %s", state, question.ID, answer.Status, answer.Value)
-			if answer.Status != "unknown" {
-				break
-			}
-		}
-		if answer == nil {
-			state += fmt.Sprintf("\n- %s [unknown]: could not confirm", question.ID)
+			// The tool result is already authoritative. Sending it directly to the
+			// final generator avoids a redundant model request for every discovery
+			// call, which is particularly important for small local models.
+			state = fmt.Sprintf("%s\n- %s [tool result]: %s", state, question.ID, result)
+			break
 		}
 	}
 
@@ -140,7 +132,7 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	if marker := strings.Index(task, "\nENVIRONMENT"); marker >= 0 {
 		task = task[:marker]
 	}
-	finalInput := []ai.Message{{Role: "user", Content: fmt.Sprintf("TASK:\n%s\n\nDISCOVERY STATE:\n%s\n\nGenerate the final script only from confirmed facts. Treat unknown facts as unavailable.", task, state)}}
+	finalInput := []ai.Message{{Role: "user", Content: fmt.Sprintf("TASK:\n%s\n\nORIGINAL REQUEST CONTEXT:\n%s\n\nDISCOVERY STATE:\n%s\n\nGenerate the final script only from confirmed facts. Treat unknown facts as unavailable.", task, initialInput[len(initialInput)-1].Content, state)}}
 	resp, _, err := a.aiClient.GetFinalScript(finalInput)
 	if err != nil {
 		return nil, "AIGenerationFailed", err
@@ -149,16 +141,18 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		return nil, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
 	}
 
-	if resp.Script == "" {
-		errMsg := fmt.Errorf("AI generation returned an empty script")
-		return nil, "AIGeneratedEmptyString", errMsg
-	}
-
 	// AI based Safety
 	if !resp.IsSafe {
 		errMsg := fmt.Errorf("AI marked script unsafe: %s", resp.Explanation)
 		return nil, "AIMarkedUnsafe", errMsg
 
+	}
+	if strings.TrimSpace(resp.Script) == "" {
+		detail := strings.TrimSpace(resp.Explanation)
+		if detail == "" {
+			detail = "no explanation was provided"
+		}
+		return nil, "AIGeneratedEmptyString", fmt.Errorf("AI returned no executable script (%s)", detail)
 	}
 
 	// Static rule based check

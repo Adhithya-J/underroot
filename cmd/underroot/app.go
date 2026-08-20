@@ -142,11 +142,18 @@ func EstimateTokens(txt string) int {
 	return utf8.RuneCountInString(txt) / 4
 }
 
+// EstimatePromptTokens estimates all message text sent in one model request.
+// It is approximate because the exact tokenizer belongs to the local model.
+func EstimatePromptTokens(messages []ai.Message) int {
+	total := 0
+	for _, message := range messages {
+		total += EstimateTokens(message.Role + message.Content)
+	}
+	return total
+}
+
 func (s *Session) TotalTokens() int { // TODO: this is entirely wrong and unreliable!! fix this
-	// add system prompt
-	// for now adding 250 tokens for that
-	systemPromptTokens := 250 // to be updated with actual count
-	total := EstimateTokens(s.CurrentInput) + systemPromptTokens
+	total := EstimateTokens(s.CurrentInput + ai.SystemPrompt().Content)
 	for i := range s.History {
 		item := &s.History[i]
 		total += EstimateTokens(item.UserInput + item.FinalScript + item.FinalExplanation + item.FinalOutput)
