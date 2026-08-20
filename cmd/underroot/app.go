@@ -163,7 +163,7 @@ func toJson(v any) string {
 }
 
 func GetCurrentDirInfo(session *Session) string {
-	return fmt.Sprintf("Current Folder Name: %s\nCurrent Working Directory: %s\nCurrent Directory Contents: %s\n", session.FolderName, session.CurrentDir, session.DirContent)
+	return fmt.Sprintf("Current Folder Name: %s\nCurrent Working Directory: %s\nParent Directory: %s\nCurrent Directory Contents: %s\n", session.FolderName, session.CurrentDir, session.ParentDir, session.DirContent)
 }
 
 func GetSessionHistory(session *Session) string {

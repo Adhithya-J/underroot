@@ -114,6 +114,10 @@ func SystemPrompt() Message {
 
 		4. File & Path Handling
 		- Never guess paths.
+		- Resolve relative language explicitly: "parent directory" means the
+		  Parent Directory value in ENVIRONMENT, not the current directory.
+		- Treat a path reported as missing as authoritative; do not retry the
+		  identical path. Inspect its parent or use a corrected candidate.
 		- If a required path is not explicitly listed in ENVIRONMENT, first use:
 		  - list_dir
 		  - exists

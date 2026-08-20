@@ -78,18 +78,20 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
 			result, toolErr := a.ExecuteTool(resp.ToolCall)
 			if toolErr != nil {
-				result = "Error : " + toolErr.Error()
+				result = fmt.Sprintf("TOOL_ERROR: %s", toolErr.Error())
 			}
-			// Keep the result in the existing request, but explicitly close the
-			// discovery phase. Small models otherwise tend to repeat the same
-			// tool call because the original task remains the most salient text.
+			// Keep the result in the existing request. A failed discovery call is
+			// not completion: the model must be allowed to choose another path or
+			// another discovery tool.
 			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(`
 
 TOOL RESULT (%s)
 %s
 
-DISCOVERY COMPLETE. Do not call any tool again. Return only the final
-PowerShell command in the script field, with tool_call set to null.`, resp.ToolCall.Name, result)
+Interpret this result before continuing. If the path is missing or the tool
+failed, do not repeat the same call: inspect the appropriate parent directory
+or try a corrected path. You may call another tool. Return a PowerShell
+script only after all required paths and files have been confirmed.`, resp.ToolCall.Name, result)
 
 		}
 
