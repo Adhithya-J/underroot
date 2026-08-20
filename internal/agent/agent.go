@@ -65,8 +65,14 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	for i := 0; i < 5; i++ {
 		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
 		if err != nil {
-			errMsg := fmt.Errorf("AI generation failed: %v", err)
-			return nil, "AIGenerationFailed", errMsg
+			// A malformed response is an internal LLM formatting failure. Retry
+			// the same request with a correction hint instead of immediately
+			// surfacing it as a user-visible agent failure.
+			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(
+				"\n\nINTERNAL RESPONSE FORMAT ERROR:\n%s\nReturn only valid JSON matching the required schema. Do not use Markdown fences.",
+				err,
+			)
+			continue
 		}
 		if resp.ToolCall != nil {
 			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
@@ -82,6 +88,13 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			break
 		}
 
+	}
+
+	if err != nil || resp == nil {
+		if err == nil {
+			err = fmt.Errorf("no response generated")
+		}
+		return nil, "AIGenerationFailed", fmt.Errorf("AI generation failed after internal retries: %v", err)
 	}
 
 	if resp.Script == "" {
