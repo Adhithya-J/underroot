@@ -14,6 +14,8 @@ type Agent struct {
 	aiClient *ai.Client
 }
 
+const maxDiscoveryToolCalls = 3
+
 // there are few types of errors - validation error (misspellings), safety error(blacklisted keywords), ai generation error (malformed script) and execution error (logic, permissions).
 // The agent should know which type of error it is dealing with and take action appropriately. Also the structure would be different
 // For the initial version, let's build a basic version of error type (unified)
@@ -89,8 +91,14 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	currentPrompt := initialInput
 	var resp *ai.AgentResponse
 	var err error
+	toolCalls := 0
+	forceFinal := false
 	for i := 0; i < 5; i++ {
-		resp, _, err = a.aiClient.GetShellScript(currentPrompt)
+		if forceFinal {
+			resp, _, err = a.aiClient.GetFinalScript(currentPrompt)
+		} else {
+			resp, _, err = a.aiClient.GetShellScript(currentPrompt)
+		}
 		if err != nil {
 			// A malformed response is an internal LLM formatting failure. Retry
 			// the same request with a correction hint instead of immediately
@@ -102,6 +110,11 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			continue
 		}
 		if resp.ToolCall != nil {
+			if forceFinal {
+				return nil, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
+			}
+
+			toolCalls++
 			ui.PrintGray("Tool Call: " + resp.ToolCall.Name)
 			result, toolErr := a.ExecuteTool(resp.ToolCall)
 			if toolErr != nil {
@@ -110,15 +123,23 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			// Keep the result in the existing request. A failed discovery call is
 			// not completion: the model must be allowed to choose another path or
 			// another discovery tool.
+			if toolCalls >= maxDiscoveryToolCalls {
+				forceFinal = true
+			}
+			instruction := `Interpret this result before continuing. If the path is missing or the tool
+failed, do not repeat the same call: inspect the appropriate parent directory
+or try a corrected path. You may call another tool. Return a PowerShell
+script only after all required paths and files have been confirmed.`
+			if forceFinal {
+				instruction = `Discovery budget reached. The next request will use the final script generator.
+Summarize only the confirmed paths and files needed for the final script.`
+			}
 			currentPrompt[len(currentPrompt)-1].Content += fmt.Sprintf(`
 
 TOOL RESULT (%s)
 %s
 
-Interpret this result before continuing. If the path is missing or the tool
-failed, do not repeat the same call: inspect the appropriate parent directory
-or try a corrected path. You may call another tool. Return a PowerShell
-script only after all required paths and files have been confirmed.`, resp.ToolCall.Name, result)
+%s`, resp.ToolCall.Name, result, instruction)
 
 		}
 

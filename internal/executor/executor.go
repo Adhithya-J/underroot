@@ -28,6 +28,18 @@ func ExecuteScript(input string) (string, error) {
 	return string(out), nil
 }
 
+// DryRunScript parses the script and executes it with PowerShell's WhatIf
+// preference enabled. WhatIf is honored by cmdlets that support the common
+// WhatIf parameter; it is not a guarantee for arbitrary native commands.
+func DryRunScript(input string) (string, error) {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$WhatIfPreference = $true
+$source = %s
+[scriptblock]::Create($source) | Out-Null
+& ([scriptblock]::Create($source))`, quotePowerShellPath(input))
+	return ExecuteScript(script)
+}
+
 // in the long term, see how you can add parsing for powershell, maybe based on AST
 
 // List_Dir lists the contents of a directory.

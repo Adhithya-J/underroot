@@ -85,6 +85,9 @@ func SystemPrompt() Message {
 		  "is_safe": true
 		}
 		- Use "tool_call" ONLY when you need more information from the environment.
+		- Use "tool_call" ONLY when you need more information from the environment.
+		- If the user message contains "FINALIZATION MODE", tool_call MUST be null;
+		  return a script or explain why no safe script can be produced.
 		- Use "script" ONLY when you are ready to execute a PowerShell command.
 		- Never use both "tool_call" and "script" in the same response.
 		- Do not use markdown fences.
@@ -141,13 +144,32 @@ func SystemPrompt() Message {
 		5. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
 
 		Workflow
-		1. Use tools if more information is required.
+		1. Use the smallest number of focused tools possible. The application
+		  enforces a maximum of three discovery calls.
 		2. Once sufficient information is available, return:
 		   - script
 		   - explanation
 		   - is_safe
 		3. If the request cannot be completed safely, set is_safe=false.
 		`,
+	}
+}
+
+// FinalSystemPrompt is used after discovery. It deliberately exposes no
+// workflow that permits another tool call.
+func FinalSystemPrompt() Message {
+	return Message{
+		Role: "system",
+		Content: `You are the final PowerShell script generator.
+
+FINAL SCRIPT MODE
+- Do not request or call any tool.
+- Return only valid JSON matching the required schema.
+- Set tool_call to null.
+- Use the confirmed environment and tool results in the user message.
+- Return a minimal safe PowerShell script, or an empty script with an
+  explanation if the request cannot be completed safely.
+- Set is_safe=false for unsafe or insufficiently confirmed actions.`,
 	}
 }
 
@@ -222,8 +244,12 @@ func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, err
 
 // BuildMessages prepends the system prompt to user messages.
 func BuildMessages(userInput []Message) []Message {
+	return BuildMessagesWithSystem(SystemPrompt(), userInput)
+}
+
+func BuildMessagesWithSystem(system Message, userInput []Message) []Message {
 	var result []Message
-	result = append(result, SystemPrompt())
+	result = append(result, system)
 	result = append(result, userInput...)
 	return result
 }
@@ -272,7 +298,11 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 }
 
 func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsResponse, error) {
-	messages := BuildMessages(input)
+	return c.chatWithSystem(ctx, SystemPrompt(), input)
+}
+
+func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Message) (*ChatCompletionsResponse, error) {
+	messages := BuildMessagesWithSystem(system, input)
 
 	body := ChatCompletionsRequest{
 		Model:    c.config.OpenAIModel,
@@ -327,5 +357,30 @@ func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error)
 		return &AgentResponse{}, "", err
 	}
 
+	return output, "", nil
+}
+
+// GetFinalScript generates a script after discovery is complete. Unlike
+// GetShellScript, this call uses a system prompt that forbids tool calls.
+func (c *Client) GetFinalScript(input []Message) (*AgentResponse, string, error) {
+	if c.config.UseMock {
+		if len(input) == 0 {
+			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
+		}
+		return &AgentResponse{
+			Script:      fmt.Sprintf("echo 'Mock final: %s'", input[len(input)-1].Content),
+			Explanation: "Mock final response",
+			IsSafe:      true,
+		}, "", nil
+	}
+
+	result, err := c.chatWithSystem(context.Background(), FinalSystemPrompt(), input)
+	if err != nil {
+		return &AgentResponse{}, "", err
+	}
+	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
+	if err != nil {
+		return &AgentResponse{}, "", err
+	}
 	return output, "", nil
 }

@@ -77,6 +77,21 @@ func main() {
 			ui.PrintExplanation(app.Session.CurrentInteraction.FinalExplanation)
 			ui.PrintLine()
 
+			ui.PrintGray("Dry-running script with PowerShell WhatIf...")
+			dryRunOut, dryRunErr := executor.DryRunScript(response.Script)
+			if dryRunErr != nil {
+				ui.PrintError("Dry run failed", dryRunErr)
+				ui.PrintOutput(dryRunOut)
+				app.Session.AddErrorHistory(AgentError{
+					ErrorType: "DryRunFailed",
+					ErrorMsg:  dryRunErr.Error(),
+					Script:    response.Script,
+					Output:    dryRunOut,
+				})
+				continue
+			}
+			ui.PrintOutput(dryRunOut)
+
 			permitted, err := ui.AskForApproval(app.Scanner)
 			if err != nil {
 				ui.PrintError("Skipping execution....\nEncountering error", err)
