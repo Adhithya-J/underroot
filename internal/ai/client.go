@@ -119,6 +119,8 @@ func SystemPrompt() Message {
 		  - exists
 		- Only generate a script after confirming paths.
 		- If a tool is used, leave script empty until discovery is complete.
+		- Internal tools are not PowerShell commands. Never put exists, list_dir, or read_file in the script field.
+		- For a directory listing, use Get-ChildItem -Path 'path'. Do not combine switches with commas, such as -File,Directory.
 
 		5. Repair Behavior
 		- If a previous execution failed:

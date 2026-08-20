@@ -90,6 +90,12 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 
 	}
 
+	// Do not allow the last tool request to fall through as an empty or stale
+	// script. Return a retryable generation error instead.
+	if resp != nil && resp.ToolCall != nil {
+		return nil, "AIGenerationFailed", fmt.Errorf("AI exhausted tool-call retries without generating a script")
+	}
+
 	if err != nil || resp == nil {
 		if err == nil {
 			err = fmt.Errorf("no response generated")
