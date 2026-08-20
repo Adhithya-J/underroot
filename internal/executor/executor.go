@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+const (
+	maxDirectoryEntries = 20
+	maxToolResultBytes  = 2048
+)
+
 func quotePowerShellPath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "''") + "'"
 }
@@ -27,8 +32,28 @@ func ExecuteScript(input string) (string, error) {
 
 // List_Dir lists the contents of a directory.
 func List_Dir(path string) (string, error) {
-	script := fmt.Sprintf("Get-ChildItem -Path %s | Select-Object Name, Mode, Length | ConvertTo-Json", quotePowerShellPath(path))
-	return ExecuteScript(script)
+	// Ask PowerShell for only one extra item so the result can report whether
+	// it was truncated without ever materializing a whole large directory.
+	script := fmt.Sprintf(`$items = @(Get-ChildItem -LiteralPath %s -ErrorAction Stop | Select-Object -First %d)
+$entries = @($items | Select-Object -First %d | ForEach-Object {
+  [pscustomobject]@{ name = $_.Name; directory = $_.PSIsContainer; length = $_.Length }
+})
+[pscustomobject]@{ path = %s; entries = $entries; shown = $entries.Count; truncated = ($items.Count -gt %d) } | ConvertTo-Json -Compress -Depth 3`,
+		quotePowerShellPath(path), maxDirectoryEntries+1, maxDirectoryEntries,
+		quotePowerShellPath(path), maxDirectoryEntries)
+
+	result, err := ExecuteScript(script)
+	if err != nil {
+		return result, err
+	}
+	if len(result) <= maxToolResultBytes {
+		return result, nil
+	}
+
+	// Keep oversized tool output valid and small. The model can retry with a
+	// narrower path or filter instead of receiving a malformed JSON fragment.
+	return fmt.Sprintf(`{"path":%s,"entries":[],"shown":0,"truncated":true,"message":"directory result exceeded the tool output budget; use a narrower query"}`,
+		quoteJSON(path)), nil
 }
 
 // Read_File reads the first 1000 characters of a file.
@@ -46,4 +71,8 @@ func Exists(path string) (string, error) {
 		quotePowerShellPath(path),
 	)
 	return ExecuteScript(script)
+}
+
+func quoteJSON(value string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", `\r`, "\n", `\n`).Replace(value) + `"`
 }
