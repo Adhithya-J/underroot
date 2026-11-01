@@ -32,7 +32,6 @@ type Session struct {
 	ParentDir  string
 	CurrentDir string
 
-	DirContent   string
 	CurrentInput string
 
 	RetryCount int
@@ -84,25 +83,6 @@ func UpdateWorkingDir(session *Session) {
 	session.CurrentDir = cwd
 	session.FolderName = filepath.Base(cwd)
 	session.ParentDir = filepath.Dir(cwd)
-
-	files, err := os.ReadDir(cwd)
-	if err != nil {
-		session.DirContent = "Error reading directory content"
-		return
-	}
-	const maxFiles = 10
-	var content []string
-	if len(files) > maxFiles {
-		files = files[:maxFiles]
-	}
-	for _, f := range files {
-		prefix := "[File]"
-		if f.IsDir() {
-			prefix = "[Dir]"
-		}
-		content = append(content, fmt.Sprintf("%s %s", prefix, f.Name()))
-	}
-	session.DirContent = strings.Join(content, ", ")
 }
 
 func EstimateTokens(txt string) int {
@@ -111,11 +91,11 @@ func EstimateTokens(txt string) int {
 
 // EstimatePromptTokens estimates message text sent for an agent context.
 func EstimatePromptTokens(ctx agent.Context) int {
-	return EstimateTokens(ctx.Task + ctx.WorkingDir + ctx.History + ctx.ActiveError)
+	return EstimateTokens(ctx.Task + ctx.WorkingDir + ctx.ParentDir + ctx.FolderName + ctx.History + ctx.ActiveError)
 }
 
 func (s *Session) TotalTokens() int {
-	total := EstimateTokens(s.CurrentInput + ai.SystemPrompt().Content)
+	total := EstimateTokens(ai.FinalSystemPrompt().Content)
 	for i := range s.History {
 		item := &s.History[i]
 		total += EstimateTokens(item.UserInput + item.FinalScript)
