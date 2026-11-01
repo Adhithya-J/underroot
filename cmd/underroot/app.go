@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -15,35 +14,15 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type AgentError struct {
+type ActiveError struct {
 	ErrorType string `json:"error_type"`
 	ErrorMsg  string `json:"error_msg"`
-	Script    string `json:"script"`
-	Output    string `json:"output"`
-}
-
-type Attempt struct {
-	AttemptNo   int        `json:"attempt_no"`
-	Explanation string     `json:"explanation,omitempty"`
-	Script      string     `json:"script,omitempty"`
-	Output      string     `json:"output,omitempty"`
-	Error       AgentError `json:"error,omitempty"`
-	Success     bool       `json:"success,omitempty"`
+	Script    string `json:"script,omitempty"`
 }
 
 type Interaction struct {
-	UserInput string    `json:"user_input"`
-	Attempts  []Attempt `json:"attempts"`
-
-	FinalScript      string `json:"final_script,omitempty"`
-	FinalExplanation string `json:"final_explanation,omitempty"`
-	FinalOutput      string `json:"final_output,omitempty"`
-	// this should also have a flag to identify requests that have failed after 'n' attempts
-	// if it failed, summary of the 'n' attempts should be added for better context!
-	Status         string `json:"status"`
-	Failed         bool   `json:"failed"`
-	AttemptCount   int    `json:"attempt_count"`
-	FailureSummary string `json:"failure_summary"`
+	UserInput   string `json:"user_input"`
+	FinalScript string `json:"final_script,omitempty"`
 }
 
 // Introduce session state
@@ -59,16 +38,8 @@ type Session struct {
 	RetryCount int `json:"retry_count"`
 	MaxRetries int `json:"max_retries"`
 
-	ErrorHistory []AgentError  `json:"error_history,omitempty"`
-	History      []Interaction `json:"history,omitempty"`
-
-	CurrentInteraction *Interaction `json:"current_interaction,omitempty"`
-
-	// for now we can keep it as a simple bool to execute commands
-	// ExecutionPermission bool `json:"execution_permission"`
-
-	// you might also want to manage session level execution permission within the this
-	// apart from a global execution permissions
+	ActiveError *ActiveError  `json:"active_error,omitempty"`
+	History     []Interaction `json:"history,omitempty"`
 }
 
 // to be used later
@@ -82,28 +53,25 @@ func (s *Session) AddInteraction(interaction Interaction) {
 	s.History = append(s.History, interaction)
 }
 
-func (s *Session) AddErrorHistory(agentError AgentError) {
-	s.ErrorHistory = append(s.ErrorHistory, agentError)
+func (s *Session) SetActiveError(errorType, errorMsg, script string) {
+	cleanMsg := strings.TrimSpace(errorMsg)
+	if len(cleanMsg) > 300 {
+		cleanMsg = cleanMsg[:300] + "..."
+	}
+	s.ActiveError = &ActiveError{
+		ErrorType: errorType,
+		ErrorMsg:  cleanMsg,
+		Script:    script,
+	}
 }
 
-func (s *Session) SetLastResponse(script, explanation string) {
-	if s.CurrentInteraction == nil {
-		s.CurrentInteraction = &Interaction{}
-	}
-	s.CurrentInteraction.FinalScript = script
-	s.CurrentInteraction.FinalExplanation = explanation
+func (s *Session) ClearActiveError() {
+	s.ActiveError = nil
 }
 
 func (s *Session) ResetRequestState() {
-	s.ErrorHistory = nil
+	s.ClearActiveError()
 	s.RetryCount = 0
-}
-
-func (s *Session) SetOutput(psout string) {
-	if s.CurrentInteraction == nil {
-		s.CurrentInteraction = &Interaction{}
-	}
-	s.CurrentInteraction.FinalOutput = psout
 }
 
 func UpdateWorkingDir(session *Session) {
@@ -152,21 +120,13 @@ func EstimatePromptTokens(messages []ai.Message) int {
 	return total
 }
 
-func (s *Session) TotalTokens() int { // TODO: this is entirely wrong and unreliable!! fix this
+func (s *Session) TotalTokens() int {
 	total := EstimateTokens(s.CurrentInput + ai.SystemPrompt().Content)
 	for i := range s.History {
 		item := &s.History[i]
-		total += EstimateTokens(item.UserInput + item.FinalScript + item.FinalExplanation + item.FinalOutput)
+		total += EstimateTokens(item.UserInput + item.FinalScript)
 	}
 	return total
-}
-
-func toJson(v any) string {
-	out, err := json.Marshal(v)
-	if err != nil {
-		return "null"
-	}
-	return string(out)
 }
 
 func GetCurrentDirInfo(session *Session) string {
@@ -174,86 +134,68 @@ func GetCurrentDirInfo(session *Session) string {
 }
 
 func GetSessionHistory(session *Session) string {
-	// Conversation history should not include explanation when being fed into prompt.
-	// tempSessionHistory := ""
-
-	return toJson(session.History)
+	if len(session.History) == 0 {
+		return "None"
+	}
+	start := 0
+	const maxHistoryTurns = 5
+	if len(session.History) > maxHistoryTurns {
+		start = len(session.History) - maxHistoryTurns
+	}
+	var sb strings.Builder
+	for i, item := range session.History[start:] {
+		sb.WriteString(fmt.Sprintf("[%d] User: %s\n    Script: %s\n", start+i+1, item.UserInput, item.FinalScript))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
-func GetLatestError(session *Session) string {
-	// This builds an error resolution strategy (currently fixed) for the LLM based on error type.
-	n := len(session.ErrorHistory)
-
-	// add gating so json parsing does not fail
-
-	// current error is last error in error history
-	if n <= 0 {
-		return "Current Error: None"
+func GetActiveError(session *Session) string {
+	if session.ActiveError == nil {
+		return ""
 	}
-
-	var errorCorrection string
-	currentError := session.ErrorHistory[n-1]
-	jsonCEOut := toJson(currentError)
-	switch currentError.ErrorType {
+	var fixHint string
+	switch session.ActiveError.ErrorType {
 	case "AIGenerationFailed":
-		errorCorrection = "Regenerate output with stricter validation."
+		fixHint = "Return valid JSON matching the schema."
 	case "AIGeneratedEmptyString":
-		errorCorrection = "Ensure response generation always returns content."
+		fixHint = "Ensure response generation always returns an executable script."
 	case "AIMarkedUnsafe":
-		errorCorrection = "Generate compliant and safe output."
+		fixHint = "Generate compliant and safe output."
 	case "RuleBasedValidationFailed":
-		errorCorrection = "Fix output so it satisfies validation rules."
-	case "ExecutionFailed":
-		errorCorrection = "Fix execution/runtime issues."
+		fixHint = "Fix output so it satisfies validation rules."
+	case "DryRunFailed", "ExecutionFailed":
+		fixHint = "Fix PowerShell script syntax/runtime errors."
 	default:
-		errorCorrection = "Analyze and fix the error."
+		fixHint = "Analyze and fix the error."
 	}
 
-	return fmt.Sprintf("Current Error: %s\nSuggested Approach to solve it: %s\n", jsonCEOut, errorCorrection)
-}
-
-func GetPastErrorHistory(session *Session) string {
-	n := len(session.ErrorHistory)
-
-	// add gating so json parsing does not fail
-
-	if n <= 1 {
-		return "Previous Errors: None"
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Error Type: %s\nError Message: %s\nSuggested Fix: %s",
+		session.ActiveError.ErrorType, session.ActiveError.ErrorMsg, fixHint))
+	if session.ActiveError.Script != "" {
+		sb.WriteString(fmt.Sprintf("\nFailed Script: %s", session.ActiveError.Script))
 	}
-
-	jsonEHOut := toJson(session.ErrorHistory[:n-1])
-
-	return fmt.Sprintf("History of previous Errors: %s", string(jsonEHOut))
+	return sb.String()
 }
 
-func BuildPrompt(session *Session) ([]ai.Message, error) { // message 0 should be system so we can make sure it is not lost. message n is last user request
-
-	var prompt []ai.Message
-
-	// iterate though the jsonEHOut and keep the latest error and mark it as current error
-	// inject appropriate error fixing strategy based on error type for that
-	currentErrorString := GetLatestError(session) // latest error with suggest fix
-
-	// the rest of the errors (if present) can be added as it is
-	historyOfErrorsString := GetPastErrorHistory(session) // past errors excluding latest one
-
-	// current dir, parent dir, current folder name, directory contents are added to prompt
-	// add to last user message
+func BuildPrompt(session *Session) ([]ai.Message, error) {
 	currentDirInfo := GetCurrentDirInfo(session)
-
-	// Session history includes previous conversations: user input, explanation of generated script, script, and PowerShell output.
 	sessionHistory := GetSessionHistory(session)
 
-	prompt = append(prompt, ai.Message{
-		Role: "user",
-		Content: fmt.Sprintf(`TASK
-	%s\n\tENVIRONMENT
-	%s\n\tCURRENT ERROR
-	%s\n\tPREVIOUS ERROR PATTERNS
-	%s\n\tCONVERSATION HISTORY
-	%s`, session.CurrentInput, currentDirInfo, currentErrorString, historyOfErrorsString, sessionHistory),
-	})
-	return prompt, nil
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("TASK\n%s\n\nENVIRONMENT\n%s\n\nCONVERSATION HISTORY\n%s",
+		session.CurrentInput, currentDirInfo, sessionHistory))
+
+	if errStr := GetActiveError(session); errStr != "" {
+		sb.WriteString(fmt.Sprintf("\n\nCURRENT RETRY ERROR\n%s", errStr))
+	}
+
+	return []ai.Message{
+		{
+			Role:    "user",
+			Content: sb.String(),
+		},
+	}, nil
 }
 
 func GetClient() *ai.Client {
