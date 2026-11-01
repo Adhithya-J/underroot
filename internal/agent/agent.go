@@ -30,7 +30,6 @@ const maxDiscoveryToolCalls = 3
 type RunResult struct {
 	Script      string
 	Explanation string
-	Success     bool
 }
 
 // NewAgent creates an agent using the provided AI client.
@@ -39,9 +38,6 @@ func NewAgent(aiClient *ai.Client) *Agent {
 		aiClient: aiClient,
 	}
 }
-
-// ToolFunc defines a callable tool implementation.
-type ToolFunc func(map[string]any) (string, error)
 
 // ExecuteTool executes the tool call returned by the AI.
 func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
@@ -333,7 +329,7 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 		Role:    "user",
 		Content: finalSb.String(),
 	}}
-	resp, _, err := a.aiClient.GetFinalScript(finalInput)
+	resp, err := a.aiClient.GetFinalScript(finalInput)
 	if err != nil {
 		return nil, "AIGenerationFailed", err
 	}
@@ -364,6 +360,5 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	return &RunResult{
 		Script:      resp.Script,
 		Explanation: resp.Explanation,
-		Success:     true,
 	}, "", nil
 }

@@ -49,12 +49,6 @@ type DiscoveryAction struct {
 	Done     bool      `json:"done"`
 }
 
-type DiscoveryAnswer struct {
-	Status string `json:"status"`
-	Value  string `json:"value,omitempty"`
-	Reason string `json:"reason,omitempty"`
-}
-
 // Config holds the application configuration.
 type Config struct {
 	OpenAIAPIKey  string
@@ -120,7 +114,6 @@ func SystemPrompt() Message {
 		  "is_safe": true
 		}
 		- Use "tool_call" ONLY when you need more information from the environment.
-		- Use "tool_call" ONLY when you need more information from the environment.
 		- If the user message contains "FINALIZATION MODE", tool_call MUST be null;
 		  return a script or explain why no safe script can be produced.
 		- Use "script" ONLY when you are ready to execute a PowerShell command.
@@ -161,7 +154,6 @@ func SystemPrompt() Message {
 		  - exists
 		- Only generate a script after confirming paths.
 		- If a tool is used, leave script empty until discovery is complete.
-		- Internal tools are not PowerShell commands. Never put exists, list_dir, or read_file in the script field.
 		- Internal tools are not PowerShell commands. Never put tool names in the script field.
 		- For a directory listing, use Get-ChildItem -Path 'path'. Do not combine switches with commas, such as -File,Directory.
 
@@ -256,12 +248,6 @@ question. User-supplied names are hints only: use search_entries for partial or
 possibly misspelled names, and treat the filesystem result as authoritative.`}
 }
 
-func DiscoveryAnswerPrompt() Message {
-	return Message{Role: "system", Content: `You interpret one filesystem tool result.
-Return only JSON: {"status":"confirmed|missing|unknown","value":"","reason":""}.
-Do not guess. Use confirmed values only; if the result is insufficient, use unknown.`}
-}
-
 // Validate checks that the client configuration is complete.
 func (cfg Config) Validate() error {
 	if cfg.UseMock {
@@ -326,30 +312,11 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 	return &agentResp, nil
 }
 
-// OpenAIChat sends messages and returns the generated content.
-func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
-	result, err := c.chat(ctx, message)
-	if err != nil {
-		return "", err
-	}
-	return result.Choices[0].Message.Content, nil
-}
-
-// BuildMessages prepends the system prompt to user messages.
-func BuildMessages(userInput []Message) []Message {
-	return BuildMessagesWithSystem(SystemPrompt(), userInput)
-}
-
 func BuildMessagesWithSystem(system Message, userInput []Message) []Message {
 	var result []Message
 	result = append(result, system)
 	result = append(result, userInput...)
 	return result
-}
-
-// MakeHTTPRequest sends a chat completion request.
-func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
-	return c.makeHTTPRequest(context.Background(), body)
 }
 
 func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsRequest) (*http.Response, error) {
@@ -450,55 +417,29 @@ func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Mes
 	return &result, nil
 }
 
-// GetShellScript returns a shell script generated from the supplied messages.
-func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error) {
+// GetFinalScript generates a script after discovery is complete. It uses a
+// system prompt that forbids tool calls.
+func (c *Client) GetFinalScript(input []Message) (*AgentResponse, error) {
 	if c.config.UseMock {
 		if len(input) == 0 {
-			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
-		}
-		return &AgentResponse{
-			Script:      fmt.Sprintf("echo 'Mock: %s'", input[len(input)-1].Content),
-			Explanation: "Mock response",
-			IsSafe:      true,
-		}, "", nil
-	}
-
-	result, err := c.Chat(input)
-	if err != nil {
-		return &AgentResponse{}, "", err
-	}
-
-	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
-	if err != nil {
-		return &AgentResponse{}, "", err
-	}
-
-	return output, "", nil
-}
-
-// GetFinalScript generates a script after discovery is complete. Unlike
-// GetShellScript, this call uses a system prompt that forbids tool calls.
-func (c *Client) GetFinalScript(input []Message) (*AgentResponse, string, error) {
-	if c.config.UseMock {
-		if len(input) == 0 {
-			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
+			return nil, errors.New("cannot generate a mock response without messages")
 		}
 		return &AgentResponse{
 			Script:      fmt.Sprintf("echo 'Mock final: %s'", input[len(input)-1].Content),
 			Explanation: "Mock final response",
 			IsSafe:      true,
-		}, "", nil
+		}, nil
 	}
 
 	result, err := c.chatWithSystem(context.Background(), FinalSystemPrompt(), input)
 	if err != nil {
-		return &AgentResponse{}, "", err
+		return nil, err
 	}
 	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
 	if err != nil {
-		return &AgentResponse{}, "", err
+		return nil, err
 	}
-	return output, "", nil
+	return output, nil
 }
 
 func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
@@ -532,17 +473,4 @@ func (c *Client) GetDiscoveryAction(question string, state string) (*DiscoveryAc
 		return nil, fmt.Errorf("invalid discovery action: %w", err)
 	}
 	return &action, nil
-}
-
-func (c *Client) GetDiscoveryAnswer(question, toolResult, state string) (*DiscoveryAnswer, error) {
-	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s\n\nTOOL RESULT:\n%s", question, state, toolResult)}}
-	result, err := c.chatWithSystem(context.Background(), DiscoveryAnswerPrompt(), input)
-	if err != nil {
-		return nil, err
-	}
-	var answer DiscoveryAnswer
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &answer); err != nil {
-		return nil, fmt.Errorf("invalid discovery answer: %w", err)
-	}
-	return &answer, nil
 }

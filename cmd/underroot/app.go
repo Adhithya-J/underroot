@@ -15,31 +15,30 @@ import (
 )
 
 type ActiveError struct {
-	ErrorType string `json:"error_type"`
-	ErrorMsg  string `json:"error_msg"`
-	Script    string `json:"script,omitempty"`
+	ErrorType string
+	ErrorMsg  string
+	Script    string
 }
 
 type Interaction struct {
-	UserInput   string `json:"user_input"`
-	FinalScript string `json:"final_script,omitempty"`
+	UserInput   string
+	FinalScript string
 }
 
-// Introduce session state
+// Session maintains conversation and environment state across user queries.
 type Session struct {
-	Model      string `json:"model"`
-	FolderName string `json:"folder_name"`
-	ParentDir  string `json:"parent_dir"`
-	CurrentDir string `json:"current_dir"`
+	Model      string
+	FolderName string
+	ParentDir  string
+	CurrentDir string
 
-	DirContent   string `json:"dir_content,omitempty"`
-	CurrentInput string `json:"current_input,omitempty"`
+	DirContent   string
+	CurrentInput string
 
-	RetryCount int `json:"retry_count"`
-	MaxRetries int `json:"max_retries"`
+	RetryCount int
 
-	ActiveError *ActiveError  `json:"active_error,omitempty"`
-	History     []Interaction `json:"history,omitempty"`
+	ActiveError *ActiveError
+	History     []Interaction
 }
 
 // to be used later
@@ -122,10 +121,6 @@ func (s *Session) TotalTokens() int {
 		total += EstimateTokens(item.UserInput + item.FinalScript)
 	}
 	return total
-}
-
-func GetCurrentDirInfo(session *Session) string {
-	return fmt.Sprintf("Current Folder Name: %s\nCurrent Working Directory: %s\nParent Directory: %s\nCurrent Directory Contents: %s\n", session.FolderName, session.CurrentDir, session.ParentDir, session.DirContent)
 }
 
 func GetSessionHistory(session *Session) string {
