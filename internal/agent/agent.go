@@ -18,14 +18,6 @@ type Agent struct {
 
 const maxDiscoveryToolCalls = 3
 
-// there are few types of errors - validation error (misspellings), safety error(blacklisted keywords), ai generation error (malformed script) and execution error (logic, permissions).
-// The agent should know which type of error it is dealing with and take action appropriately. Also the structure would be different
-// For the initial version, let's build a basic version of error type (unified)
-
-// Also should entire error history be included?
-// A naive approach would be to use the entire error history
-// But I think when we run into an execution error, we can be sure that the script has passed the safety and validation error and those errors can be removed from error history
-
 // RunResult contains the validated result of an agent run.
 type RunResult struct {
 	Script      string
@@ -48,6 +40,19 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		}
 		return value, nil
 	}
+	optionalType := func() string {
+		if t, ok := tc.Args["type"].(string); ok && t != "" {
+			return t
+		}
+		return "any"
+	}
+	optionalLimit := func() int {
+		if limit, ok := tc.Args["limit"].(float64); ok && limit > 0 {
+			return int(limit)
+		}
+		return 20
+	}
+
 	switch tc.Name {
 	case "user_downloads":
 		return executor.UserDownloads()
@@ -56,7 +61,7 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return executor.List_Dir(path) // Or executor directly if bypassing validator
+		return executor.List_Dir(path)
 	case "find_entry":
 		path, err := stringArg("path")
 		if err != nil {
@@ -66,11 +71,7 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		entryType, _ := tc.Args["type"].(string)
-		if entryType == "" {
-			entryType = "any"
-		}
-		return executor.Find_Entry(path, name, entryType)
+		return executor.Find_Entry(path, name, optionalType())
 	case "search_entries":
 		path, err := stringArg("path")
 		if err != nil {
@@ -80,15 +81,7 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		entryType, _ := tc.Args["type"].(string)
-		if entryType == "" {
-			entryType = "any"
-		}
-		limit := 20
-		if value, ok := tc.Args["limit"].(float64); ok {
-			limit = int(value)
-		}
-		return executor.Search_Entries(path, query, entryType, limit)
+		return executor.Search_Entries(path, query, optionalType(), optionalLimit())
 	case "find_file":
 		path, err := stringArg("path")
 		if err != nil {
@@ -98,11 +91,7 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		limit := 20
-		if value, ok := tc.Args["limit"].(float64); ok {
-			limit = int(value)
-		}
-		return executor.Find_File(path, extension, limit)
+		return executor.Find_File(path, extension, optionalLimit())
 	case "read_file":
 		path, err := stringArg("path")
 		if err != nil {
@@ -131,8 +120,8 @@ func SummarizeToolResult(toolName, rawResult string) string {
 	switch toolName {
 	case "list_dir":
 		var res struct {
-			Path      string `json:"path"`
-			Entries   []struct {
+			Path    string `json:"path"`
+			Entries []struct {
 				Name      string `json:"name"`
 				Directory bool   `json:"directory"`
 			} `json:"entries"`
@@ -142,11 +131,9 @@ func SummarizeToolResult(toolName, rawResult string) string {
 		if err := json.Unmarshal([]byte(rawResult), &res); err != nil {
 			return rawResult
 		}
-		// If only a few entries (<= 3), no need to summarize
 		if len(res.Entries) <= 3 && !res.Truncated {
 			return rawResult
 		}
-		// Exploratory or large output: summarize
 		var sample []string
 		for i := 0; i < len(res.Entries) && i < 3; i++ {
 			kind := "file"
@@ -167,9 +154,7 @@ func SummarizeToolResult(toolName, rawResult string) string {
 			Path    string `json:"path"`
 			Query   string `json:"query"`
 			Entries []struct {
-				Name      string `json:"name"`
-				Directory bool   `json:"directory"`
-				FullName  string `json:"full_name"`
+				FullName string `json:"full_name"`
 			} `json:"entries"`
 			Shown int `json:"shown"`
 		}
@@ -180,7 +165,7 @@ func SummarizeToolResult(toolName, rawResult string) string {
 			return rawResult
 		}
 		var sample []string
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 3 && i < len(res.Entries); i++ {
 			sample = append(sample, res.Entries[i].FullName)
 		}
 		return fmt.Sprintf("Search in %s for '%s' returned %d matches. Top 3: [%s]",
@@ -191,7 +176,6 @@ func SummarizeToolResult(toolName, rawResult string) string {
 			Path      string `json:"path"`
 			Extension string `json:"extension"`
 			Files     []struct {
-				Name     string `json:"name"`
 				FullName string `json:"full_name"`
 			} `json:"files"`
 			Shown int `json:"shown"`
@@ -203,7 +187,7 @@ func SummarizeToolResult(toolName, rawResult string) string {
 			return rawResult
 		}
 		var sample []string
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 3 && i < len(res.Files); i++ {
 			sample = append(sample, res.Files[i].FullName)
 		}
 		return fmt.Sprintf("Found %d matching %s files in %s. First 3: [%s]",
@@ -236,6 +220,22 @@ type Context struct {
 	ActiveError string
 }
 
+type confirmedFact struct {
+	ID      string
+	Summary string
+}
+
+func formatFacts(facts []confirmedFact, emptyMsg string) string {
+	if len(facts) == 0 {
+		return emptyMsg
+	}
+	var sb strings.Builder
+	for _, f := range facts {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
+	}
+	return sb.String()
+}
+
 // Run generates, validates, and returns a safe shell script.
 func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	if strings.TrimSpace(ctx.Task) == "" {
@@ -256,50 +256,35 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 		plan.Questions = plan.Questions[:maxDiscoveryToolCalls]
 	}
 
-	type confirmedFact struct {
-		ID      string
-		Summary string
-	}
 	var facts []confirmedFact
 
 	for _, question := range plan.Questions {
-		for attempt := 0; attempt < 2; attempt++ {
-			var factsSb strings.Builder
-			if len(facts) == 0 {
-				factsSb.WriteString("No facts confirmed yet.")
-			} else {
-				for _, f := range facts {
-					factsSb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
-				}
-			}
-			state := fmt.Sprintf("TASK:\n%s\nWorking Directory: %s\nParent Directory: %s\n\nCONFIRMED FACTS:\n%s",
-				ctx.Task, ctx.WorkingDir, ctx.ParentDir, factsSb.String())
+		state := fmt.Sprintf("TASK:\n%s\nWorking Directory: %s\nParent Directory: %s\n\nCONFIRMED FACTS:\n%s",
+			ctx.Task, ctx.WorkingDir, ctx.ParentDir, formatFacts(facts, "No facts confirmed yet."))
 
-			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
-			if actionErr != nil {
-				return nil, "AIGenerationFailed", actionErr
-			}
-			if action.ToolCall == nil {
-				facts = append(facts, confirmedFact{
-					ID:      question.ID,
-					Summary: action.Answer,
-				})
-				break
-			}
-
-			ui.PrintGray("Tool Call: " + action.ToolCall.Name)
-			result, toolErr := a.ExecuteTool(action.ToolCall)
-			if toolErr != nil {
-				result = "TOOL_ERROR: " + toolErr.Error()
-			} else {
-				result = SummarizeToolResult(action.ToolCall.Name, result)
-			}
+		action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
+		if actionErr != nil {
+			return nil, "AIGenerationFailed", actionErr
+		}
+		if action.ToolCall == nil {
 			facts = append(facts, confirmedFact{
 				ID:      question.ID,
-				Summary: result,
+				Summary: action.Answer,
 			})
-			break
+			continue
 		}
+
+		ui.PrintGray("Tool Call: " + action.ToolCall.Name)
+		result, toolErr := a.ExecuteTool(action.ToolCall)
+		if toolErr != nil {
+			result = "TOOL_ERROR: " + toolErr.Error()
+		} else {
+			result = SummarizeToolResult(action.ToolCall.Name, result)
+		}
+		facts = append(facts, confirmedFact{
+			ID:      question.ID,
+			Summary: result,
+		})
 	}
 
 	// 2. Final Script Generation: receives the task, environment, confirmed facts, and active retry error (if retrying)
@@ -316,13 +301,7 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	}
 
 	finalSb.WriteString("\nCONFIRMED DISCOVERY FACTS:\n")
-	if len(facts) == 0 {
-		finalSb.WriteString("No additional filesystem facts required.\n")
-	} else {
-		for _, f := range facts {
-			finalSb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
-		}
-	}
+	finalSb.WriteString(formatFacts(facts, "No additional filesystem facts required.\n"))
 	finalSb.WriteString("\nGenerate the final script only from confirmed facts. Treat unknown paths as unavailable.")
 
 	finalInput := []ai.Message{{
@@ -339,9 +318,7 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 
 	// AI based Safety
 	if !resp.IsSafe {
-		errMsg := fmt.Errorf("AI marked script unsafe: %s", resp.Explanation)
-		return nil, "AIMarkedUnsafe", errMsg
-
+		return nil, "AIMarkedUnsafe", fmt.Errorf("AI marked script unsafe: %s", resp.Explanation)
 	}
 	if strings.TrimSpace(resp.Script) == "" {
 		detail := strings.TrimSpace(resp.Explanation)
@@ -353,8 +330,7 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 
 	// Static rule based check
 	if err := validator.Validate(resp.Script); err != nil {
-		errMsg := fmt.Errorf("validation failed: %s", err)
-		return nil, "RuleBasedValidationFailed", errMsg
+		return nil, "RuleBasedValidationFailed", fmt.Errorf("validation failed: %s", err)
 	}
 
 	return &RunResult{
