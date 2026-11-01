@@ -49,14 +49,10 @@ func main() {
 			app.Session.RetryCount = i
 			ui.PrintRetry(app.Session.RetryCount, maxRetries)
 
-			input, err := BuildPrompt(app.Session)
-			if err != nil {
-				ui.PrintError("Error building prompt", err)
-				break
-			}
-			ui.PrintGray(fmt.Sprintf("Request context: %d/4096 estimated tokens", EstimatePromptTokens(input)))
+			agentCtx := BuildContext(app.Session)
+			ui.PrintGray(fmt.Sprintf("Request context: %d/4096 estimated tokens", EstimatePromptTokens(agentCtx)))
 			ui.PrintGray("Generating response...")
-			response, errType, runErr := app.Agent.Run(input)
+			response, errType, runErr := app.Agent.Run(agentCtx)
 			if runErr != nil {
 				ui.PrintError("Agent run failed", runErr)
 				app.Session.SetActiveError(errType, runErr.Error(), "")

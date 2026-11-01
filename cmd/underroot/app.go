@@ -110,14 +110,9 @@ func EstimateTokens(txt string) int {
 	return utf8.RuneCountInString(txt) / 4
 }
 
-// EstimatePromptTokens estimates all message text sent in one model request.
-// It is approximate because the exact tokenizer belongs to the local model.
-func EstimatePromptTokens(messages []ai.Message) int {
-	total := 0
-	for _, message := range messages {
-		total += EstimateTokens(message.Role + message.Content)
-	}
-	return total
+// EstimatePromptTokens estimates message text sent for an agent context.
+func EstimatePromptTokens(ctx agent.Context) int {
+	return EstimateTokens(ctx.Task + ctx.WorkingDir + ctx.History + ctx.ActiveError)
 }
 
 func (s *Session) TotalTokens() int {
@@ -178,24 +173,16 @@ func GetActiveError(session *Session) string {
 	return sb.String()
 }
 
-func BuildPrompt(session *Session) ([]ai.Message, error) {
-	currentDirInfo := GetCurrentDirInfo(session)
-	sessionHistory := GetSessionHistory(session)
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("TASK\n%s\n\nENVIRONMENT\n%s\n\nCONVERSATION HISTORY\n%s",
-		session.CurrentInput, currentDirInfo, sessionHistory))
-
-	if errStr := GetActiveError(session); errStr != "" {
-		sb.WriteString(fmt.Sprintf("\n\nCURRENT RETRY ERROR\n%s", errStr))
+// BuildContext constructs the typed context required for an agent run.
+func BuildContext(session *Session) agent.Context {
+	return agent.Context{
+		Task:        session.CurrentInput,
+		WorkingDir:  session.CurrentDir,
+		ParentDir:   session.ParentDir,
+		FolderName:  session.FolderName,
+		History:     GetSessionHistory(session),
+		ActiveError: GetActiveError(session),
 	}
-
-	return []ai.Message{
-		{
-			Role:    "user",
-			Content: sb.String(),
-		},
-	}, nil
 }
 
 func GetClient() *ai.Client {

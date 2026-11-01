@@ -230,12 +230,29 @@ func SummarizeToolResult(toolName, rawResult string) string {
 	}
 }
 
+// Context contains the structured environment and conversation state for an agent run.
+type Context struct {
+	Task        string
+	WorkingDir  string
+	ParentDir   string
+	FolderName  string
+	History     string
+	ActiveError string
+}
+
 // Run generates, validates, and returns a safe shell script.
-func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
-	if len(initialInput) == 0 {
-		return nil, "AIGenerationFailed", fmt.Errorf("empty agent input")
+func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
+	if strings.TrimSpace(ctx.Task) == "" {
+		return nil, "AIGenerationFailed", fmt.Errorf("empty agent task")
 	}
-	plan, err := a.aiClient.GetDiscoveryPlan(initialInput)
+
+	// 1. Discovery Plan: planner only needs the active task and directory environment
+	planInput := []ai.Message{{
+		Role: "user",
+		Content: fmt.Sprintf("TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s",
+			ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir),
+	}}
+	plan, err := a.aiClient.GetDiscoveryPlan(planInput)
 	if err != nil {
 		return nil, "AIGenerationFailed", err
 	}
@@ -249,7 +266,6 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	}
 	var facts []confirmedFact
 
-	requestCtx := initialInput[len(initialInput)-1].Content
 	for _, question := range plan.Questions {
 		for attempt := 0; attempt < 2; attempt++ {
 			var factsSb strings.Builder
@@ -260,7 +276,8 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 					factsSb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
 				}
 			}
-			state := fmt.Sprintf("REQUEST CONTEXT:\n%s\n\nCONFIRMED FACTS:\n%s", requestCtx, factsSb.String())
+			state := fmt.Sprintf("TASK:\n%s\nWorking Directory: %s\nParent Directory: %s\n\nCONFIRMED FACTS:\n%s",
+				ctx.Task, ctx.WorkingDir, ctx.ParentDir, factsSb.String())
 
 			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
 			if actionErr != nil {
@@ -289,9 +306,20 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		}
 	}
 
+	// 2. Final Script Generation: receives the task, environment, confirmed facts, and active retry error (if retrying)
 	var finalSb strings.Builder
-	finalSb.WriteString(requestCtx)
-	finalSb.WriteString("\n\nCONFIRMED DISCOVERY FACTS:\n")
+	finalSb.WriteString(fmt.Sprintf("TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s\n",
+		ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir))
+
+	if ctx.History != "" && ctx.History != "None" {
+		finalSb.WriteString(fmt.Sprintf("\nCONVERSATION HISTORY:\n%s\n", ctx.History))
+	}
+
+	if ctx.ActiveError != "" {
+		finalSb.WriteString(fmt.Sprintf("\nCURRENT RETRY ERROR:\n%s\n", ctx.ActiveError))
+	}
+
+	finalSb.WriteString("\nCONFIRMED DISCOVERY FACTS:\n")
 	if len(facts) == 0 {
 		finalSb.WriteString("No additional filesystem facts required.\n")
 	} else {

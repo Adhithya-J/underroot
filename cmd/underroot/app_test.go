@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestBuildPromptWithoutActiveError(t *testing.T) {
+func TestBuildContextWithoutActiveError(t *testing.T) {
 	session := &Session{
 		FolderName:   "underroot",
 		CurrentDir:   `C:\projects\underroot`,
@@ -16,30 +16,22 @@ func TestBuildPromptWithoutActiveError(t *testing.T) {
 		},
 	}
 
-	messages, err := BuildPrompt(session)
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
+	ctx := BuildContext(session)
+	if ctx.Task != "list files" {
+		t.Fatalf("expected task 'list files', got: %s", ctx.Task)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(messages))
+	if ctx.ActiveError != "" {
+		t.Fatalf("expected empty ActiveError, got: %s", ctx.ActiveError)
 	}
-
-	content := messages[0].Content
-	if strings.Contains(content, "CURRENT RETRY ERROR") {
-		t.Fatalf("prompt unexpectedly contained CURRENT RETRY ERROR: %s", content)
+	if !strings.Contains(ctx.History, "[1] User: show downloads") {
+		t.Fatalf("expected formatted history, got: %s", ctx.History)
 	}
-	if strings.Contains(content, "PREVIOUS ERROR PATTERNS") {
-		t.Fatalf("prompt unexpectedly contained PREVIOUS ERROR PATTERNS: %s", content)
-	}
-	if !strings.Contains(content, "TASK\nlist files") {
-		t.Fatalf("prompt missing task: %s", content)
-	}
-	if !strings.Contains(content, "[1] User: show downloads") {
-		t.Fatalf("prompt missing formatted history: %s", content)
+	if est := EstimatePromptTokens(ctx); est <= 0 {
+		t.Fatalf("expected positive estimated tokens, got: %d", est)
 	}
 }
 
-func TestBuildPromptWithActiveError(t *testing.T) {
+func TestBuildContextWithActiveError(t *testing.T) {
 	session := &Session{
 		FolderName:   "underroot",
 		CurrentDir:   `C:\projects\underroot`,
@@ -49,25 +41,17 @@ func TestBuildPromptWithActiveError(t *testing.T) {
 
 	session.SetActiveError("ExecutionFailed", "Cannot find path", "Get-ChildItem -Path non_existent")
 
-	messages, err := BuildPrompt(session)
-	if err != nil {
-		t.Fatalf("BuildPrompt failed: %v", err)
+	ctx := BuildContext(session)
+	if !strings.Contains(ctx.ActiveError, "ExecutionFailed") {
+		t.Fatalf("expected ActiveError to contain ExecutionFailed, got: %s", ctx.ActiveError)
 	}
-
-	content := messages[0].Content
-	if !strings.Contains(content, "CURRENT RETRY ERROR") {
-		t.Fatalf("prompt missing CURRENT RETRY ERROR: %s", content)
-	}
-	if !strings.Contains(content, "Failed Script: Get-ChildItem -Path non_existent") {
-		t.Fatalf("prompt missing failed script: %s", content)
+	if !strings.Contains(ctx.ActiveError, "Failed Script: Get-ChildItem -Path non_existent") {
+		t.Fatalf("expected ActiveError to contain failed script, got: %s", ctx.ActiveError)
 	}
 
 	session.ClearActiveError()
-	messagesAfterClear, err := BuildPrompt(session)
-	if err != nil {
-		t.Fatalf("BuildPrompt after clear failed: %v", err)
-	}
-	if strings.Contains(messagesAfterClear[0].Content, "CURRENT RETRY ERROR") {
-		t.Fatalf("prompt still contained error after clear: %s", messagesAfterClear[0].Content)
+	ctxAfterClear := BuildContext(session)
+	if ctxAfterClear.ActiveError != "" {
+		t.Fatalf("expected empty ActiveError after clear, got: %s", ctxAfterClear.ActiveError)
 	}
 }
