@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -123,6 +124,112 @@ func (a *Agent) ExecuteTool(tc *ai.ToolCall) (string, error) {
 	}
 }
 
+// SummarizeToolResult keeps small outputs (<= 3 items) verbatim, but summarizes
+// exploratory or large tool outputs to prevent context bloat.
+func SummarizeToolResult(toolName, rawResult string) string {
+	rawResult = strings.TrimSpace(rawResult)
+	if strings.HasPrefix(rawResult, "TOOL_ERROR:") {
+		return rawResult
+	}
+
+	switch toolName {
+	case "list_dir":
+		var res struct {
+			Path      string `json:"path"`
+			Entries   []struct {
+				Name      string `json:"name"`
+				Directory bool   `json:"directory"`
+			} `json:"entries"`
+			Shown     int  `json:"shown"`
+			Truncated bool `json:"truncated"`
+		}
+		if err := json.Unmarshal([]byte(rawResult), &res); err != nil {
+			return rawResult
+		}
+		// If only a few entries (<= 3), no need to summarize
+		if len(res.Entries) <= 3 && !res.Truncated {
+			return rawResult
+		}
+		// Exploratory or large output: summarize
+		var sample []string
+		for i := 0; i < len(res.Entries) && i < 3; i++ {
+			kind := "file"
+			if res.Entries[i].Directory {
+				kind = "dir"
+			}
+			sample = append(sample, fmt.Sprintf("%s (%s)", res.Entries[i].Name, kind))
+		}
+		summary := fmt.Sprintf("Directory %s contains %d items (first 3: %s)",
+			res.Path, res.Shown, strings.Join(sample, ", "))
+		if res.Truncated {
+			summary += " [truncated; more items exist]"
+		}
+		return summary
+
+	case "search_entries":
+		var res struct {
+			Path    string `json:"path"`
+			Query   string `json:"query"`
+			Entries []struct {
+				Name      string `json:"name"`
+				Directory bool   `json:"directory"`
+				FullName  string `json:"full_name"`
+			} `json:"entries"`
+			Shown int `json:"shown"`
+		}
+		if err := json.Unmarshal([]byte(rawResult), &res); err != nil {
+			return rawResult
+		}
+		if len(res.Entries) <= 3 {
+			return rawResult
+		}
+		var sample []string
+		for i := 0; i < 3; i++ {
+			sample = append(sample, res.Entries[i].FullName)
+		}
+		return fmt.Sprintf("Search in %s for '%s' returned %d matches. Top 3: [%s]",
+			res.Path, res.Query, res.Shown, strings.Join(sample, ", "))
+
+	case "find_file":
+		var res struct {
+			Path      string `json:"path"`
+			Extension string `json:"extension"`
+			Files     []struct {
+				Name     string `json:"name"`
+				FullName string `json:"full_name"`
+			} `json:"files"`
+			Shown int `json:"shown"`
+		}
+		if err := json.Unmarshal([]byte(rawResult), &res); err != nil {
+			return rawResult
+		}
+		if len(res.Files) <= 3 {
+			return rawResult
+		}
+		var sample []string
+		for i := 0; i < 3; i++ {
+			sample = append(sample, res.Files[i].FullName)
+		}
+		return fmt.Sprintf("Found %d matching %s files in %s. First 3: [%s]",
+			res.Shown, res.Extension, res.Path, strings.Join(sample, ", "))
+
+	case "read_file":
+		lines := strings.Split(rawResult, "\n")
+		if len(rawResult) > 300 || len(lines) > 10 {
+			preview := rawResult
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			return fmt.Sprintf("File content (%d lines, %d bytes): %s", len(lines), len(rawResult), preview)
+		}
+		return rawResult
+
+	default:
+		// exists, find_entry, user_downloads are already single-entry/concise facts
+		return rawResult
+	}
+}
+
 // Run generates, validates, and returns a safe shell script.
 func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 	if len(initialInput) == 0 {
@@ -136,18 +243,34 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 		plan.Questions = plan.Questions[:maxDiscoveryToolCalls]
 	}
 
-	// Discovery actions are generated in separate model calls. Preserve the
-	// environment captured in the original request so they can inspect the
-	// correct parent or ancestor instead of inventing a path.
-	state := fmt.Sprintf("REQUEST CONTEXT:\n%s\n\nNo facts confirmed.", initialInput[len(initialInput)-1].Content)
+	type confirmedFact struct {
+		ID      string
+		Summary string
+	}
+	var facts []confirmedFact
+
+	requestCtx := initialInput[len(initialInput)-1].Content
 	for _, question := range plan.Questions {
 		for attempt := 0; attempt < 2; attempt++ {
+			var factsSb strings.Builder
+			if len(facts) == 0 {
+				factsSb.WriteString("No facts confirmed yet.")
+			} else {
+				for _, f := range facts {
+					factsSb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
+				}
+			}
+			state := fmt.Sprintf("REQUEST CONTEXT:\n%s\n\nCONFIRMED FACTS:\n%s", requestCtx, factsSb.String())
+
 			action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
 			if actionErr != nil {
 				return nil, "AIGenerationFailed", actionErr
 			}
 			if action.ToolCall == nil {
-				state = fmt.Sprintf("%s\n- %s [confirmed]: %s", state, question.ID, action.Answer)
+				facts = append(facts, confirmedFact{
+					ID:      question.ID,
+					Summary: action.Answer,
+				})
 				break
 			}
 
@@ -155,23 +278,33 @@ func (a *Agent) Run(initialInput []ai.Message) (*RunResult, string, error) {
 			result, toolErr := a.ExecuteTool(action.ToolCall)
 			if toolErr != nil {
 				result = "TOOL_ERROR: " + toolErr.Error()
+			} else {
+				result = SummarizeToolResult(action.ToolCall.Name, result)
 			}
-			// The tool result is already authoritative. Sending it directly to the
-			// final generator avoids a redundant model request for every discovery
-			// call, which is particularly important for small local models.
-			state = fmt.Sprintf("%s\n- %s [tool result]: %s", state, question.ID, result)
+			facts = append(facts, confirmedFact{
+				ID:      question.ID,
+				Summary: result,
+			})
 			break
 		}
 	}
 
-	task := initialInput[len(initialInput)-1].Content
-	if marker := strings.Index(task, "\n\tENVIRONMENT"); marker >= 0 {
-		task = task[:marker]
+	var finalSb strings.Builder
+	finalSb.WriteString(requestCtx)
+	finalSb.WriteString("\n\nCONFIRMED DISCOVERY FACTS:\n")
+	if len(facts) == 0 {
+		finalSb.WriteString("No additional filesystem facts required.\n")
+	} else {
+		for _, f := range facts {
+			finalSb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
+		}
 	}
-	if marker := strings.Index(task, "\nENVIRONMENT"); marker >= 0 {
-		task = task[:marker]
-	}
-	finalInput := []ai.Message{{Role: "user", Content: fmt.Sprintf("TASK:\n%s\n\nORIGINAL REQUEST CONTEXT:\n%s\n\nDISCOVERY STATE:\n%s\n\nGenerate the final script only from confirmed facts. Treat unknown facts as unavailable.", task, initialInput[len(initialInput)-1].Content, state)}}
+	finalSb.WriteString("\nGenerate the final script only from confirmed facts. Treat unknown paths as unavailable.")
+
+	finalInput := []ai.Message{{
+		Role:    "user",
+		Content: finalSb.String(),
+	}}
 	resp, _, err := a.aiClient.GetFinalScript(finalInput)
 	if err != nil {
 		return nil, "AIGenerationFailed", err
