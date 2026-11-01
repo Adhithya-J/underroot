@@ -16,6 +16,17 @@ func TestParseAgentJSONOutputRejectsEmptyResponse(t *testing.T) {
 	}
 }
 
+func TestCleanJSONStripsFences(t *testing.T) {
+	raw := "```json\n{\"script\":\"dir\",\"is_safe\":true}\n```"
+	resp, err := ParseAgentJsonOutput(raw)
+	if err != nil {
+		t.Fatalf("ParseAgentJsonOutput failed on fenced JSON: %v", err)
+	}
+	if resp.Script != "dir" || !resp.IsSafe {
+		t.Fatalf("unexpected parsed response: %+v", resp)
+	}
+}
+
 func TestFinalSystemPromptRequiresSafeFlag(t *testing.T) {
 	prompt := FinalSystemPrompt().Content
 	for _, required := range []string{"\"is_safe\":true", "All four keys are required", "do not omit it"} {

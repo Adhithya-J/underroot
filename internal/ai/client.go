@@ -281,22 +281,24 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// ParseAgentJsonOutput parses an AI response into an AgentResponse.
-func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+// cleanJSON strips markdown code fences and whitespace from AI responses.
+func cleanJSON(input string) string {
 	input = strings.TrimSpace(input)
 	if strings.HasPrefix(input, "```") {
-		// Small models sometimes wrap otherwise valid JSON in a Markdown
-		// code fence despite the system prompt asking for raw JSON.
-		lines := strings.Split(input, "\n")
-		if len(lines) >= 2 {
-			lines = lines[1:]
-			if last := len(lines) - 1; strings.TrimSpace(lines[last]) == "```" {
-				lines = lines[:last]
-			}
-			input = strings.TrimSpace(strings.Join(lines, "\n"))
+		if firstNewline := strings.Index(input, "\n"); firstNewline != -1 {
+			input = input[firstNewline+1:]
 		}
+		if lastFence := strings.LastIndex(input, "```"); lastFence != -1 {
+			input = input[:lastFence]
+		}
+		input = strings.TrimSpace(input)
 	}
+	return input
+}
 
+// ParseAgentJsonOutput parses an AI response into an AgentResponse.
+func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+	input = cleanJSON(input)
 	if input == "" {
 		return nil, errors.New("AI returned an empty response body")
 	}
@@ -447,8 +449,12 @@ func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
+	cleaned := cleanJSON(result.Choices[0].Message.Content)
+	if cleaned == "" {
+		return nil, errors.New("discovery plan contained no content")
+	}
 	var plan DiscoveryPlan
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &plan); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
 		return nil, fmt.Errorf("invalid discovery plan: %w", err)
 	}
 	if len(plan.Questions) == 0 {
@@ -468,8 +474,12 @@ func (c *Client) GetDiscoveryAction(question string, state string) (*DiscoveryAc
 	if err != nil {
 		return nil, err
 	}
+	cleaned := cleanJSON(result.Choices[0].Message.Content)
+	if cleaned == "" {
+		return nil, errors.New("discovery action contained no content")
+	}
 	var action DiscoveryAction
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result.Choices[0].Message.Content)), &action); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &action); err != nil {
 		return nil, fmt.Errorf("invalid discovery action: %w", err)
 	}
 	return &action, nil
