@@ -73,6 +73,12 @@ func main() {
 			if dryRunErr != nil {
 				ui.PrintError("Dry run failed", dryRunErr)
 				ui.PrintOutput(dryRunOut)
+				if executor.IsPermissionDenied(dryRunErr) {
+					ui.PrintGray("Permission Denied: This operation requires elevated permissions.")
+					ui.PrintGray("Please run Underroot in an elevated (Administrator) PowerShell prompt or adjust folder permissions.")
+					app.Session.ClearActiveError()
+					break
+				}
 				errMsg := dryRunErr.Error()
 				if trimmed := strings.TrimSpace(dryRunOut); trimmed != "" {
 					errMsg += ": " + trimmed
@@ -94,6 +100,12 @@ func main() {
 				if err != nil {
 					ui.PrintError("Execution Error", err)
 					ui.PrintOutput(psOut)
+					if executor.IsPermissionDenied(err) {
+						ui.PrintGray("Permission Denied: This operation requires elevated permissions.")
+						ui.PrintGray("Please run Underroot in an elevated (Administrator) PowerShell prompt or adjust folder permissions.")
+						app.Session.ClearActiveError()
+						break
+					}
 					errMsg := err.Error()
 					if trimmed := strings.TrimSpace(psOut); trimmed != "" {
 						errMsg += ": " + trimmed

@@ -51,3 +51,22 @@ func TestSearchEntriesMatchesPartialNameIgnoringCase(t *testing.T) {
 		t.Fatalf("unexpected search result: %s", result)
 	}
 }
+
+func TestPermissionDeniedClassification(t *testing.T) {
+	mockErr := os.ErrPermission
+
+	unauthErr := checkPermissionError("Get-Item : Access to the path is denied. [System.UnauthorizedAccessException]", mockErr)
+	if !IsPermissionDenied(unauthErr) {
+		t.Fatalf("expected ErrPermissionDenied for UnauthorizedAccessException, got: %v", unauthErr)
+	}
+
+	elevationErr := checkPermissionError("The requested operation requires elevation (Run as administrator)", mockErr)
+	if !IsPermissionDenied(elevationErr) {
+		t.Fatalf("expected ErrPermissionDenied for elevation message, got: %v", elevationErr)
+	}
+
+	normalErr := checkPermissionError("ItemNotFoundException: Path does not exist", mockErr)
+	if IsPermissionDenied(normalErr) {
+		t.Fatalf("did not expect ErrPermissionDenied for normal error, got: %v", normalErr)
+	}
+}

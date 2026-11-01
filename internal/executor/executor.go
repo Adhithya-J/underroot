@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -10,6 +11,25 @@ const (
 	maxDirectoryEntries = 20
 	maxToolResultBytes  = 2048
 )
+
+// ErrPermissionDenied indicates a command failed due to missing permissions or required elevation.
+var ErrPermissionDenied = errors.New("permission denied")
+
+// IsPermissionDenied checks if the error indicates a permission or elevation failure.
+func IsPermissionDenied(err error) bool {
+	return errors.Is(err, ErrPermissionDenied)
+}
+
+func checkPermissionError(output string, baseErr error) error {
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "unauthorizedaccessexception") ||
+		strings.Contains(lower, "access is denied") ||
+		strings.Contains(lower, "requires elevation") ||
+		strings.Contains(lower, "administrator privilege") {
+		return fmt.Errorf("%w: %s", ErrPermissionDenied, strings.TrimSpace(output))
+	}
+	return baseErr
+}
 
 func quotePowerShellPath(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "''") + "'"
@@ -23,7 +43,9 @@ func ExecuteScript(input string) (string, error) {
 	cmd := exec.Command("powershell", "-NoProfile", "-Command", input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("powershell execution failed: %w", err)
+		outStr := string(out)
+		permErr := checkPermissionError(outStr, fmt.Errorf("powershell execution failed: %w", err))
+		return outStr, permErr
 	}
 	return string(out), nil
 }

@@ -70,7 +70,18 @@ type Client struct {
 	// systemPrompt Message
 }
 
-const chatTransportAttempts = 2
+const (
+	chatTransportAttempts = 3
+	initialBackoffMs      = 500
+)
+
+func isRetryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests ||
+		code == http.StatusInternalServerError ||
+		code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout
+}
 
 // ChatCompletionsRequest is the request payload for chat completions.
 type ChatCompletionsRequest struct {
@@ -369,17 +380,25 @@ func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsReques
 
 		resp, err := c.httpClient.Do(req)
 		if err == nil {
-			return resp, nil
+			if !isRetryableStatus(resp.StatusCode) {
+				return resp, nil
+			}
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("server returned retryable status %d: %s", resp.StatusCode, string(bodyBytes))
+		} else {
+			lastErr = err
 		}
-		lastErr = err
+
 		if ctx.Err() != nil {
 			break
 		}
 		if attempt+1 < chatTransportAttempts {
+			backoff := time.Duration(initialBackoffMs*(1<<attempt)) * time.Millisecond
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(250 * time.Millisecond):
+			case <-time.After(backoff):
 			}
 		}
 	}
