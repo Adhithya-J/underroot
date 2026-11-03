@@ -33,6 +33,25 @@ type AgentResponse struct {
 	IsSafe      bool      `json:"is_safe"`
 }
 
+// DiscoveryQuestion represents a question identified during discovery.
+type DiscoveryQuestion struct {
+	ID       string `json:"id"`
+	Question string `json:"question"`
+	Required bool   `json:"required"`
+}
+
+// DiscoveryPlan represents the set of questions required to complete a discovery phase.
+type DiscoveryPlan struct {
+	Questions []DiscoveryQuestion `json:"questions"`
+}
+
+// DiscoveryAction represents an action or tool call to answer a discovery question.
+type DiscoveryAction struct {
+	ToolCall *ToolCall `json:"tool_call,omitempty"`
+	Answer   string    `json:"answer,omitempty"`
+	Done     bool      `json:"done"`
+}
+
 // Config holds the application configuration.
 type Config struct {
 	OpenAIAPIKey  string
@@ -46,6 +65,19 @@ type Client struct {
 	config     Config
 	httpClient *http.Client
 	// systemPrompt Message
+}
+
+const (
+	chatTransportAttempts = 3
+	initialBackoffMs      = 500
+)
+
+func isRetryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests ||
+		code == http.StatusInternalServerError ||
+		code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout
 }
 
 // ChatCompletionsRequest is the request payload for chat completions.
@@ -85,6 +117,8 @@ func SystemPrompt() Message {
 		  "is_safe": true
 		}
 		- Use "tool_call" ONLY when you need more information from the environment.
+		- If the user message contains "FINALIZATION MODE", tool_call MUST be null;
+		  return a script or explain why no safe script can be produced.
 		- Use "script" ONLY when you are ready to execute a PowerShell command.
 		- Never use both "tool_call" and "script" in the same response.
 		- Do not use markdown fences.
@@ -114,12 +148,16 @@ func SystemPrompt() Message {
 
 		4. File & Path Handling
 		- Never guess paths.
+		- Resolve relative language explicitly: "parent directory" means the
+		  Parent Directory value in ENVIRONMENT, not the current directory.
+		- Treat a path reported as missing as authoritative; do not retry the
+		  identical path. Inspect its parent or use a corrected candidate.
 		- If a required path is not explicitly listed in ENVIRONMENT, first use:
 		  - list_dir
 		  - exists
 		- Only generate a script after confirming paths.
 		- If a tool is used, leave script empty until discovery is complete.
-		- Internal tools are not PowerShell commands. Never put exists, list_dir, or read_file in the script field.
+		- Internal tools are not PowerShell commands. Never put tool names in the script field.
 		- For a directory listing, use Get-ChildItem -Path 'path'. Do not combine switches with commas, such as -File,Directory.
 
 		5. Repair Behavior
@@ -130,11 +168,24 @@ func SystemPrompt() Message {
 
 		Available Tools
 		1. list_dir({"path":"string"}) - Lists contents of a directory.
-		2. exists({"path":"string"}) - Checks if a path exists.
-		3. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
+		2. find_entry({"path":"string","name":"string","type":"file|directory|any"}) - Finds one exact-name child entry.
+		3. find_file({"path":"string","extension":"string","limit":number}) - Finds a bounded number of matching files directly in a directory.
+		4. exists({"path":"string"}) - Checks if a path exists.
+		5. read_file({"path":"string"}) - Reads the first 1000 characters of a file.
+		6. search_entries({"path":"string","query":"string","type":"file|directory|any","limit":number})
+		   - Finds direct child names containing query, ignoring case.
+		7. user_downloads({}) - Returns the current user's standard Downloads folder.
+		   Use this only when the user explicitly says their standard/personal
+		   Downloads location. A generic named "downloads folder" must be found
+		   from the supplied working-directory environment instead.
+		- Treat every name supplied by the user as an untrusted search hint. The
+		  filesystem tool result is the only source of truth for paths. Use
+		  search_entries for partial names or likely spelling mistakes; do not
+		  construct a path from a user-provided name unless a tool confirmed it.
 
 		Workflow
-		1. Use tools if more information is required.
+		1. Use the smallest number of focused tools possible. The application
+		  enforces a maximum of three discovery calls.
 		2. Once sufficient information is available, return:
 		   - script
 		   - explanation
@@ -142,6 +193,64 @@ func SystemPrompt() Message {
 		3. If the request cannot be completed safely, set is_safe=false.
 		`,
 	}
+}
+
+// FinalSystemPrompt is used after discovery. It deliberately exposes no
+// workflow that permits another tool call.
+func FinalSystemPrompt() Message {
+	return Message{
+		Role: "system",
+		Content: `You are the final PowerShell script generator.
+
+FINAL SCRIPT MODE
+- Do not request or call any tool.
+- Return only valid JSON in exactly this shape:
+  {"tool_call":null,"script":"powershell script","explanation":"short description","is_safe":true}
+- All four keys are required. is_safe must be the JSON boolean true for every
+  safe script; do not omit it.
+- Set tool_call to null.
+- Use the confirmed environment and tool results in the user message.
+- For a request that can be completed safely, script MUST contain a minimal
+  executable PowerShell script. Never return an empty script for a safe
+  request.
+- If the request cannot be completed safely, set is_safe=false and explain
+  why. Do not return a placeholder, an empty script, or a tool call.
+- Opening a confirmed image with Start-Process is a benign, non-destructive
+  action. It may be marked safe when the image path was confirmed by tools.
+- Opening a local folder or image is safe. A script may resolve the current
+  user's Downloads folder dynamically from the USERPROFILE environment value and
+  check whether it and an image exist before opening anything; that is not
+  guessing a path and is safe.
+- If a required folder or image is absent, the script must terminate with
+  throw (not Write-Host or Write-Warning) so the application can retry with
+  the actual failure.
+- Set is_safe=false for unsafe or insufficiently confirmed actions.`,
+	}
+}
+
+// DiscoveryPlanPrompt returns the system prompt for planning discovery questions.
+func DiscoveryPlanPrompt() Message {
+	return Message{Role: "system", Content: `You are a filesystem discovery planner.
+Return only JSON: {"questions":[{"id":"string","question":"string","required":true}]}.
+Identify the minimum facts required to complete the user's task. Always return
+at least one question when the task refers to an unknown file, folder, or path.
+Do not call tools, generate PowerShell, guess paths, or include explanations
+outside JSON.`}
+}
+
+// DiscoveryActionPrompt returns the system prompt for taking a discovery action.
+func DiscoveryActionPrompt() Message {
+	return Message{Role: "system", Content: `You are a filesystem discovery assistant.
+Return only JSON matching:
+{"tool_call":{"name":"tool_name","args":{}},"answer":"","done":false}
+or {"tool_call":null,"answer":"...","done":true}.
+For the current question, either choose exactly one focused tool call or answer
+from confirmed facts. Never generate PowerShell. Use user_downloads with {} only
+for an explicit personal/standard Downloads request. For a generic named folder,
+use the working-directory context to inspect its parent or ancestors. Never use
+list_dir when exists, find_entry, find_file, or search_entries can answer the
+question. User-supplied names are hints only: use search_entries for partial or
+possibly misspelled names, and treat the filesystem result as authoritative.`}
 }
 
 // Validate checks that the client configuration is complete.
@@ -177,20 +286,26 @@ func NewClient(cfg Config) (*Client, error) {
 	}, nil
 }
 
-// ParseAgentJsonOutput parses an AI response into an AgentResponse.
-func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+// cleanJSON strips markdown code fences and whitespace from AI responses.
+func cleanJSON(input string) string {
 	input = strings.TrimSpace(input)
 	if strings.HasPrefix(input, "```") {
-		// Small models sometimes wrap otherwise valid JSON in a Markdown
-		// code fence despite the system prompt asking for raw JSON.
-		lines := strings.Split(input, "\n")
-		if len(lines) >= 2 {
-			lines = lines[1:]
-			if last := len(lines) - 1; strings.TrimSpace(lines[last]) == "```" {
-				lines = lines[:last]
-			}
-			input = strings.TrimSpace(strings.Join(lines, "\n"))
+		if firstNewline := strings.Index(input, "\n"); firstNewline != -1 {
+			input = input[firstNewline+1:]
 		}
+		if lastFence := strings.LastIndex(input, "```"); lastFence != -1 {
+			input = input[:lastFence]
+		}
+		input = strings.TrimSpace(input)
+	}
+	return input
+}
+
+// ParseAgentJsonOutput parses an AI response into an AgentResponse.
+func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
+	input = cleanJSON(input)
+	if input == "" {
+		return nil, errors.New("AI returned an empty response body")
 	}
 
 	var agentResp AgentResponse
@@ -204,26 +319,12 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 	return &agentResp, nil
 }
 
-// OpenAIChat sends messages and returns the generated content.
-func (c *Client) OpenAIChat(ctx context.Context, message []Message) (string, error) {
-	result, err := c.chat(ctx, message)
-	if err != nil {
-		return "", err
-	}
-	return result.Choices[0].Message.Content, nil
-}
-
-// BuildMessages prepends the system prompt to user messages.
-func BuildMessages(userInput []Message) []Message {
+// BuildMessagesWithSystem prepends a system message to the user message slice.
+func BuildMessagesWithSystem(system Message, userInput []Message) []Message {
 	var result []Message
-	result = append(result, SystemPrompt())
+	result = append(result, system)
 	result = append(result, userInput...)
 	return result
-}
-
-// MakeHTTPRequest sends a chat completion request.
-func (c *Client) MakeHTTPRequest(body ChatCompletionsRequest) (*http.Response, error) {
-	return c.makeHTTPRequest(context.Background(), body)
 }
 
 func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsRequest) (*http.Response, error) {
@@ -240,23 +341,43 @@ func (c *Client) makeHTTPRequest(ctx context.Context, body ChatCompletionsReques
 		return nil, err
 	}
 
-	// Setting up request
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		endpoint,
-		bytes.NewBuffer(data),
-	)
-	if err != nil {
-		return nil, err
+	var lastErr error
+	for attempt := 0; attempt < chatTransportAttempts; attempt++ {
+		// A request body cannot be reused after a failed HTTP attempt, so create a
+		// fresh request for the retry. Chat-completion requests are safe to retry:
+		// they have no side effects outside the local model server.
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err == nil {
+			if !isRetryableStatus(resp.StatusCode) {
+				return resp, nil
+			}
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("server returned retryable status %d: %s", resp.StatusCode, string(bodyBytes))
+		} else {
+			lastErr = err
+		}
+
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt+1 < chatTransportAttempts {
+			backoff := time.Duration(initialBackoffMs*(1<<attempt)) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
 	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.OpenAIAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	// Making HTTP Request
-	resp, err := c.httpClient.Do(req)
-	return resp, err
+	return nil, fmt.Errorf("chat completion request failed after %d attempts: %w", chatTransportAttempts, lastErr)
 }
 
 // Chat sends messages and decodes the completion response.
@@ -265,7 +386,11 @@ func (c *Client) Chat(input []Message) (*ChatCompletionsResponse, error) {
 }
 
 func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsResponse, error) {
-	messages := BuildMessages(input)
+	return c.chatWithSystem(ctx, SystemPrompt(), input)
+}
+
+func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Message) (*ChatCompletionsResponse, error) {
+	messages := BuildMessagesWithSystem(system, input)
 
 	body := ChatCompletionsRequest{
 		Model:    c.config.OpenAIModel,
@@ -294,31 +419,76 @@ func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsRes
 	if len(result.Choices) == 0 {
 		return &ChatCompletionsResponse{}, fmt.Errorf("empty response")
 	}
+	if strings.TrimSpace(result.Choices[0].Message.Content) == "" {
+		return &ChatCompletionsResponse{}, fmt.Errorf("empty completion content")
+	}
 	return &result, nil
 }
 
-// GetShellScript returns a shell script generated from the supplied messages.
-func (c *Client) GetShellScript(input []Message) (*AgentResponse, string, error) {
+// GetFinalScript generates a script after discovery is complete. It uses a
+// system prompt that forbids tool calls.
+func (c *Client) GetFinalScript(input []Message) (*AgentResponse, error) {
 	if c.config.UseMock {
 		if len(input) == 0 {
-			return &AgentResponse{}, "", errors.New("cannot generate a mock response without messages")
+			return nil, errors.New("cannot generate a mock response without messages")
 		}
 		return &AgentResponse{
-			Script:      fmt.Sprintf("echo 'Mock: %s'", input[len(input)-1].Content),
-			Explanation: "Mock response",
+			Script:      fmt.Sprintf("echo 'Mock final: %s'", input[len(input)-1].Content),
+			Explanation: "Mock final response",
 			IsSafe:      true,
-		}, "", nil
+		}, nil
 	}
 
-	result, err := c.Chat(input)
+	result, err := c.chatWithSystem(context.Background(), FinalSystemPrompt(), input)
 	if err != nil {
-		return &AgentResponse{}, "", err
+		return nil, err
 	}
-
 	output, err := ParseAgentJsonOutput(result.Choices[0].Message.Content)
 	if err != nil {
-		return &AgentResponse{}, "", err
+		return nil, err
 	}
+	return output, nil
+}
 
-	return output, "", nil
+// GetDiscoveryPlan requests a discovery plan containing questions needed for the task.
+func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
+	result, err := c.chatWithSystem(context.Background(), DiscoveryPlanPrompt(), input)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := cleanJSON(result.Choices[0].Message.Content)
+	if cleaned == "" {
+		return nil, errors.New("discovery plan contained no content")
+	}
+	var plan DiscoveryPlan
+	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
+		return nil, fmt.Errorf("invalid discovery plan: %w", err)
+	}
+	if len(plan.Questions) == 0 {
+		return nil, errors.New("discovery plan contained no questions")
+	}
+	for _, question := range plan.Questions {
+		if question.ID == "" || question.Question == "" {
+			return nil, errors.New("discovery plan contained an incomplete question")
+		}
+	}
+	return &plan, nil
+}
+
+// GetDiscoveryAction requests an action or answer for the specified discovery question.
+func (c *Client) GetDiscoveryAction(question, state string) (*DiscoveryAction, error) {
+	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s", question, state)}}
+	result, err := c.chatWithSystem(context.Background(), DiscoveryActionPrompt(), input)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := cleanJSON(result.Choices[0].Message.Content)
+	if cleaned == "" {
+		return nil, errors.New("discovery action contained no content")
+	}
+	var action DiscoveryAction
+	if err := json.Unmarshal([]byte(cleaned), &action); err != nil {
+		return nil, fmt.Errorf("invalid discovery action: %w", err)
+	}
+	return &action, nil
 }

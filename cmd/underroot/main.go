@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Adhithya-J/underroot.git/internal/executor"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
@@ -12,18 +13,34 @@ const (
 	maxRetries = 3
 )
 
+func handleExecutionFailure(session *Session, errType string, err error, output, script string) bool {
+	ui.PrintError(errType, err)
+	ui.PrintOutput(output)
+	if executor.IsPermissionDenied(err) {
+		ui.PrintGray("Permission Denied: This operation requires elevated permissions.")
+		ui.PrintGray("Please run Underroot in an elevated (Administrator) PowerShell prompt or adjust folder permissions.")
+		session.ClearActiveError()
+		return true // Terminate retry loop on elevation requirement
+	}
+	errMsg := err.Error()
+	if trimmed := strings.TrimSpace(output); trimmed != "" {
+		errMsg += ": " + trimmed
+	}
+	session.SetActiveError(errType, errMsg, script)
+	return false // Continue retry loop
+}
+
 func main() {
-	app := NewApp() //  session starts with a fresh session state
+	app := NewApp() // session starts with a fresh session state
 
 	ui.PrintBanner()
 
 	for { // outer loop of ui for a session
-		UpdateWorkingDir(app.Session) // adds current dir path, current folder name, parent dir path, current dir contents to session state, to help llm better navigate the filesystem
+		UpdateWorkingDir(app.Session)
 		ui.PrintPromptBar(app.Session.ParentDir, app.Session.FolderName, app.Session.Model, app.Session.TotalTokens())
 
-		// each query in a session starts with a fresh error history (empty)
-		// this was done to keep session ctx window shorter (since we are dealing with SLMs), however, keeping the error history across the session would be useful to avoid recurring errors, essentially we are not allowing the model to do good ICL of the environment
-		app.Session.ErrorHistory = nil
+		// Each query starts with no active transient error
+		app.Session.ClearActiveError()
 
 		txt, err := ui.ReadInput(app.Scanner)
 		if err != nil {
@@ -34,7 +51,7 @@ func main() {
 			continue
 		}
 
-		app.Session.CurrentInput = txt // should current input be added to session state as a separate variable?
+		app.Session.CurrentInput = txt
 
 		if app.Session.CurrentInput == "" {
 			continue
@@ -43,93 +60,74 @@ func main() {
 		if ui.ShouldExit(app.Session.CurrentInput) {
 			break
 		}
-		attemptStatus := false // this tracks whether user question is successfully answered after all retries
-		// depending on the value, what gets added to session state ctx varies
-		// previously, we were was only storing successful attempts, then realized, unsuccessful attempts will also be useful
-		// but what to store in unsuccessful attempts? - the error message, but how would you structure it, i haven't explore on that,
-		// TODO: how to structure errors to add them to context for failed attempts?
 
 		app.Session.ResetRequestState()
 		for i := 0; i < maxRetries; i++ {
 			app.Session.RetryCount = i
 			ui.PrintRetry(app.Session.RetryCount, maxRetries)
 
-			input, err := BuildPrompt(app.Session) // what is fed into llm prompt? a structured version of conversation history with suggested fix for errors
-			if err != nil {
-				ui.PrintError("Error parsing json", err)
-			}
+			agentCtx := BuildContext(app.Session)
+			ui.PrintGray(fmt.Sprintf("Request context: %d/4096 estimated tokens", EstimatePromptTokens(agentCtx)))
 			ui.PrintGray("Generating response...")
-			response, errType, runErr := app.Agent.Run(input) // what does this do?
+			response, errType, runErr := app.Agent.Run(agentCtx)
 			if runErr != nil {
 				ui.PrintError("Agent run failed", runErr)
-				app.Session.AddErrorHistory(AgentError{
-					ErrorType: errType,
-					ErrorMsg:  runErr.Error(),
-					Script:    "",
-					Output:    "",
-				})
+				app.Session.SetActiveError(errType, runErr.Error(), "")
 				continue
 			}
 			ui.PrintLine()
-			app.Session.SetLastResponse(response.Script, response.Explanation)
 
-			ui.PrintScript(app.Session.CurrentInteraction.FinalScript)
-			ui.PrintExplanation(app.Session.CurrentInteraction.FinalExplanation)
+			ui.PrintScript(response.Script)
+			ui.PrintExplanation(response.Explanation)
 			ui.PrintLine()
+
+			ui.PrintGray("Dry-running script with PowerShell WhatIf...")
+			dryRunOut, dryRunErr := executor.DryRunScript(response.Script)
+			if dryRunErr != nil {
+				if handleExecutionFailure(app.Session, "DryRunFailed", dryRunErr, dryRunOut, response.Script) {
+					break
+				}
+				continue
+			}
+			ui.PrintOutput(dryRunOut)
 
 			permitted, err := ui.AskForApproval(app.Scanner)
 			if err != nil {
 				ui.PrintError("Skipping execution....\nEncountering error", err)
+				app.Session.ClearActiveError()
 				break
 			}
-			if permitted {
-				ui.PrintGray("Executing Script....")
-				psOut, err := executor.ExecuteScript(response.Script)
-				if err != nil {
-					ui.PrintError("Execution Error", err)
-					ui.PrintOutput(psOut)
-					app.Session.AddErrorHistory(AgentError{
-						ErrorType: "ExecutionFailed",
-						ErrorMsg:  err.Error(),
-						Script:    response.Script,
-						Output:    psOut,
-					})
-					continue
-				}
-				app.Session.SetOutput(psOut)
-
-				interaction := Interaction{
-					UserInput:        app.Session.CurrentInput,
-					FinalExplanation: response.Explanation,
-					FinalScript:      response.Script,
-					FinalOutput:      psOut,
-				}
-				app.Session.AddInteraction(interaction)
-
-				ui.PrintOutput(app.Session.CurrentInteraction.FinalOutput)
-				fmt.Println("Success!")
-				attemptStatus = true
-				fmt.Printf("History size: %d\n", len(app.Session.History))
-				ui.PrintLine()
-
-				break
-			} else {
+			if !permitted {
 				ui.PrintGray("Skipping execution")
+				app.Session.ClearActiveError()
 				ui.PrintLine()
 				break
-
 			}
-		}
-		// adding failed attempt flags to llm knows what the previous requests were
-		if !attemptStatus {
-			app.Session.AddInteraction(Interaction{
-				UserInput:        app.Session.CurrentInput,
-				FinalExplanation: "",
-				FinalScript:      "<could-not-be-generated>",
-				FinalOutput:      "",
-			})
-		}
-	}
 
-	ui.PrintLine()
+			ui.PrintGray("Executing Script....")
+			psOut, err := executor.ExecuteScript(response.Script)
+			if err != nil {
+				if handleExecutionFailure(app.Session, "ExecutionFailed", err, psOut, response.Script) {
+					break
+				}
+				continue
+			}
+
+			// On success: store lean interaction and clear active error
+			app.Session.AddInteraction(Interaction{
+				UserInput:   app.Session.CurrentInput,
+				FinalScript: response.Script,
+			})
+			app.Session.ClearActiveError()
+
+			ui.PrintOutput(psOut)
+			fmt.Println("Success!")
+			fmt.Printf("History size: %d\n", len(app.Session.History))
+			ui.PrintLine()
+			break
+		}
+
+		// Ensure transient error is not carried to the next query
+		app.Session.ClearActiveError()
+	}
 }

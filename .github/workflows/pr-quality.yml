@@ -33,7 +33,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # Keep the project on its declared Go toolchain.
-          go-version: '1.23.12'
+          go-version: '1.26.x'
           cache: true
 
       - name: Verify Go toolchain
@@ -42,7 +42,7 @@ jobs:
       - name: Run vulnerability check
         uses: golang/govulncheck-action@v1
         with:
-          go-version-file: go.mod
+          go-version-input: '1.26.x'
 
       - name: Run tests with race detector
         run: go test -race -v -coverprofile=coverage.out ./...
