@@ -231,7 +231,7 @@ func formatFacts(facts []confirmedFact, emptyMsg string) string {
 	}
 	var sb strings.Builder
 	for _, f := range facts {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", f.ID, f.Summary))
+		fmt.Fprintf(&sb, "- %s: %s\n", f.ID, f.Summary)
 	}
 	return sb.String()
 }
@@ -289,15 +289,15 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 
 	// 2. Final Script Generation: receives the task, environment, confirmed facts, and active retry error (if retrying)
 	var finalSb strings.Builder
-	finalSb.WriteString(fmt.Sprintf("TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s\n",
-		ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir))
+	fmt.Fprintf(&finalSb, "TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s\n",
+		ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir)
 
 	if ctx.History != "" && ctx.History != "None" {
-		finalSb.WriteString(fmt.Sprintf("\nCONVERSATION HISTORY:\n%s\n", ctx.History))
+		fmt.Fprintf(&finalSb, "\nCONVERSATION HISTORY:\n%s\n", ctx.History)
 	}
 
 	if ctx.ActiveError != "" {
-		finalSb.WriteString(fmt.Sprintf("\nCURRENT RETRY ERROR:\n%s\n", ctx.ActiveError))
+		fmt.Fprintf(&finalSb, "\nCURRENT RETRY ERROR:\n%s\n", ctx.ActiveError)
 	}
 
 	finalSb.WriteString("\nCONFIRMED DISCOVERY FACTS:\n")

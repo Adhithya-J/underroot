@@ -38,7 +38,7 @@ func TestFinalSystemPromptRequiresSafeFlag(t *testing.T) {
 
 func TestChatRetriesTransportFailure(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if calls.Add(1) == 1 {
 			connection, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -65,7 +65,7 @@ func TestChatRetriesTransportFailure(t *testing.T) {
 }
 
 func TestChatRejectsEmptyCompletionContent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"   "}}]}`))
 	}))

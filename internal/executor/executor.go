@@ -84,7 +84,7 @@ func List_Dir(path string) (string, error) {
 	items := make([]listEntry, 0, len(shownEntries))
 	for _, e := range shownEntries {
 		var length int64
-		if info, err := e.Info(); err == nil {
+		if info, infoErr := e.Info(); infoErr == nil {
 			length = info.Size()
 		}
 		items = append(items, listEntry{
@@ -129,18 +129,19 @@ func Find_Entry(path, name, entryType string) (string, error) {
 	var fullName *string
 
 	for _, e := range entries {
-		if e.Name() == name {
-			if entryType == "file" && e.IsDir() {
-				continue
-			}
-			if entryType == "directory" && !e.IsDir() {
-				continue
-			}
-			found = true
-			fn := filepath.Join(path, e.Name())
-			fullName = &fn
-			break
+		if e.Name() != name {
+			continue
 		}
+		if entryType == "file" && e.IsDir() {
+			continue
+		}
+		if entryType == "directory" && !e.IsDir() {
+			continue
+		}
+		found = true
+		fn := filepath.Join(path, e.Name())
+		fullName = &fn
+		break
 	}
 
 	type findEntryResponse struct {
@@ -259,7 +260,7 @@ func Find_File(path, extension string, limit int) (string, error) {
 	for _, e := range entries {
 		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), lowerExt) {
 			var length int64
-			if info, err := e.Info(); err == nil {
+			if info, infoErr := e.Info(); infoErr == nil {
 				length = info.Size()
 			}
 			files = append(files, fileEntry{
@@ -295,7 +296,8 @@ func Find_File(path, extension string, limit int) (string, error) {
 
 // Read_File reads the first 1000 lines of a file.
 func Read_File(path string) (string, error) {
-	f, err := os.Open(path)
+	// #nosec G304 -- reading the requested file path is this tool's purpose.
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}
@@ -346,7 +348,8 @@ func UserDownloads() (string, error) {
 	}
 
 	downloads := filepath.Join(profile, "Downloads")
-	info, err := os.Stat(downloads)
+	// #nosec G703 -- path traversal check on user profile downloads directory
+	info, err := os.Stat(filepath.Clean(downloads))
 	exists := err == nil && info.IsDir()
 
 	type downloadsResponse struct {

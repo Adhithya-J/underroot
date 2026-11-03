@@ -33,16 +33,19 @@ type AgentResponse struct {
 	IsSafe      bool      `json:"is_safe"`
 }
 
+// DiscoveryQuestion represents a question identified during discovery.
 type DiscoveryQuestion struct {
 	ID       string `json:"id"`
 	Question string `json:"question"`
 	Required bool   `json:"required"`
 }
 
+// DiscoveryPlan represents the set of questions required to complete a discovery phase.
 type DiscoveryPlan struct {
 	Questions []DiscoveryQuestion `json:"questions"`
 }
 
+// DiscoveryAction represents an action or tool call to answer a discovery question.
 type DiscoveryAction struct {
 	ToolCall *ToolCall `json:"tool_call,omitempty"`
 	Answer   string    `json:"answer,omitempty"`
@@ -225,6 +228,7 @@ FINAL SCRIPT MODE
 	}
 }
 
+// DiscoveryPlanPrompt returns the system prompt for planning discovery questions.
 func DiscoveryPlanPrompt() Message {
 	return Message{Role: "system", Content: `You are a filesystem discovery planner.
 Return only JSON: {"questions":[{"id":"string","question":"string","required":true}]}.
@@ -234,6 +238,7 @@ Do not call tools, generate PowerShell, guess paths, or include explanations
 outside JSON.`}
 }
 
+// DiscoveryActionPrompt returns the system prompt for taking a discovery action.
 func DiscoveryActionPrompt() Message {
 	return Message{Role: "system", Content: `You are a filesystem discovery assistant.
 Return only JSON matching:
@@ -314,6 +319,7 @@ func ParseAgentJsonOutput(input string) (*AgentResponse, error) {
 	return &agentResp, nil
 }
 
+// BuildMessagesWithSystem prepends a system message to the user message slice.
 func BuildMessagesWithSystem(system Message, userInput []Message) []Message {
 	var result []Message
 	result = append(result, system)
@@ -444,6 +450,7 @@ func (c *Client) GetFinalScript(input []Message) (*AgentResponse, error) {
 	return output, nil
 }
 
+// GetDiscoveryPlan requests a discovery plan containing questions needed for the task.
 func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	result, err := c.chatWithSystem(context.Background(), DiscoveryPlanPrompt(), input)
 	if err != nil {
@@ -468,7 +475,8 @@ func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	return &plan, nil
 }
 
-func (c *Client) GetDiscoveryAction(question string, state string) (*DiscoveryAction, error) {
+// GetDiscoveryAction requests an action or answer for the specified discovery question.
+func (c *Client) GetDiscoveryAction(question, state string) (*DiscoveryAction, error) {
 	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s", question, state)}}
 	result, err := c.chatWithSystem(context.Background(), DiscoveryActionPrompt(), input)
 	if err != nil {

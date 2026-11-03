@@ -114,7 +114,7 @@ func GetSessionHistory(session *Session) string {
 	}
 	var sb strings.Builder
 	for i, item := range session.History[start:] {
-		sb.WriteString(fmt.Sprintf("[%d] User: %s\n    Script: %s\n", start+i+1, item.UserInput, item.FinalScript))
+		fmt.Fprintf(&sb, "[%d] User: %s\n    Script: %s\n", start+i+1, item.UserInput, item.FinalScript)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -140,10 +140,10 @@ func GetActiveError(session *Session) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Error Type: %s\nError Message: %s\nSuggested Fix: %s",
-		session.ActiveError.ErrorType, session.ActiveError.ErrorMsg, fixHint))
+	fmt.Fprintf(&sb, "Error Type: %s\nError Message: %s\nSuggested Fix: %s",
+		session.ActiveError.ErrorType, session.ActiveError.ErrorMsg, fixHint)
 	if session.ActiveError.Script != "" {
-		sb.WriteString(fmt.Sprintf("\nFailed Script: %s", session.ActiveError.Script))
+		fmt.Fprintf(&sb, "\nFailed Script: %s", session.ActiveError.Script)
 	}
 	return sb.String()
 }
