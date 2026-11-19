@@ -32,7 +32,7 @@ func main() {
 	verbose := flag.Bool("verbose", false, "log the request mode for every completion")
 	flag.Parse()
 
-	server := &mockServer{
+	mock := &mockServer{
 		engine:  ai.NewScenarioEngine(),
 		delay:   *delay,
 		verbose: *verbose,
@@ -43,10 +43,10 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("/v1/models", server.handleModels)
+	mux.HandleFunc("/v1/models", mock.handleModels)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
-			server.handleChat(w, r)
+			mock.handleChat(w, r)
 			return
 		}
 		writeError(w, http.StatusNotFound, "unknown endpoint: "+r.URL.Path)
@@ -54,7 +54,15 @@ func main() {
 
 	log.Printf("mock LLM listening on http://%s", *addr)
 	log.Printf("OpenAIBaseURL can be http://%s/ or http://%s/v1", *addr, *addr)
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	server := &http.Server{
+		Addr:              *addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("mock LLM stopped: %v", err)
 	}
 }
@@ -123,44 +131,44 @@ func (s *mockServer) handleChat(w http.ResponseWriter, r *http.Request) {
 
 // complete picks the scenario behavior from the system prompt, mirroring the
 // three model roles the client uses.
-func (s *mockServer) complete(req ai.ChatCompletionsRequest) (string, []ai.ResponseToolCall, string, error) {
+func (s *mockServer) complete(req ai.ChatCompletionsRequest) (content string, toolCalls []ai.ResponseToolCall, mode string, err error) {
 	system, user := splitMessages(req.Messages)
 
 	switch {
 	case strings.Contains(system, "filesystem discovery planner"):
-		plan, err := s.engine.GetDiscoveryPlan(user)
-		if err != nil {
-			return "", nil, "discovery_plan", err
+		plan, planErr := s.engine.GetDiscoveryPlan(user)
+		if planErr != nil {
+			return "", nil, "discovery_plan", planErr
 		}
-		data, err := json.Marshal(plan)
-		return string(data), nil, "discovery_plan", err
+		data, marshalErr := json.Marshal(plan)
+		return string(data), nil, "discovery_plan", marshalErr
 
 	case strings.Contains(system, "filesystem discovery assistant"):
 		question, state := splitDiscoveryPrompt(user)
-		action, err := s.engine.GetDiscoveryAction(question, state)
-		if err != nil {
-			return "", nil, "discovery_action", err
+		action, actionErr := s.engine.GetDiscoveryAction(question, state)
+		if actionErr != nil {
+			return "", nil, "discovery_action", actionErr
 		}
 		if action.ToolCall != nil {
-			args, err := json.Marshal(action.ToolCall.Args)
-			if err != nil {
-				return "", nil, "discovery_action", err
+			args, marshalErr := json.Marshal(action.ToolCall.Args)
+			if marshalErr != nil {
+				return "", nil, "discovery_action", marshalErr
 			}
 			call := ai.ResponseToolCall{ID: "call_mock_1", Type: "function"}
 			call.Function.Name = action.ToolCall.Name
 			call.Function.Arguments = string(args)
 			return "", []ai.ResponseToolCall{call}, "discovery_action_tool", nil
 		}
-		data, err := json.Marshal(action)
-		return string(data), nil, "discovery_action_answer", err
+		data, marshalErr := json.Marshal(action)
+		return string(data), nil, "discovery_action_answer", marshalErr
 
 	default:
-		final, err := s.engine.GetFinalScript(user)
-		if err != nil {
-			return "", nil, "final_script", err
+		final, finalErr := s.engine.GetFinalScript(user)
+		if finalErr != nil {
+			return "", nil, "final_script", finalErr
 		}
-		data, err := json.Marshal(final)
-		return string(data), nil, "final_script", err
+		data, marshalErr := json.Marshal(final)
+		return string(data), nil, "final_script", marshalErr
 	}
 }
 
@@ -175,7 +183,7 @@ func splitMessages(messages []ai.Message) (system string, user []ai.Message) {
 	return system, user
 }
 
-func splitDiscoveryPrompt(messages []ai.Message) (string, string) {
+func splitDiscoveryPrompt(messages []ai.Message) (question, state string) {
 	if len(messages) == 0 {
 		return "", ""
 	}
@@ -187,8 +195,8 @@ func splitDiscoveryPrompt(messages []ai.Message) (string, string) {
 	if questionAt < 0 || stateAt < 0 || stateAt < questionAt {
 		return content, ""
 	}
-	question := strings.TrimSpace(content[questionAt+len(questionMarker) : stateAt])
-	state := strings.TrimSpace(content[stateAt+len(stateMarker):])
+	question = strings.TrimSpace(content[questionAt+len(questionMarker) : stateAt])
+	state = strings.TrimSpace(content[stateAt+len(stateMarker):])
 	return question, state
 }
 

@@ -496,26 +496,28 @@ func searchQuery(task string) string {
 	}
 	lower := strings.ToLower(task)
 	for _, kw := range []string{"find ", "search for ", "search ", "locate ", "where is "} {
-		if i := strings.Index(lower, kw); i >= 0 {
-			q := strings.TrimSpace(task[i+len(kw):])
-			for {
-				trimmed := false
-				for _, p := range []string{"the ", "a ", "an ", "all ", "any ", "files ", "file ", "named ", "called "} {
-					if len(q) >= len(p) && strings.EqualFold(q[:len(p)], p) {
-						q = strings.TrimSpace(q[len(p):])
-						trimmed = true
-					}
-				}
-				if !trimmed {
-					break
+		i := strings.Index(lower, kw)
+		if i < 0 {
+			continue
+		}
+		q := strings.TrimSpace(task[i+len(kw):])
+		for {
+			trimmed := false
+			for _, p := range []string{"the ", "a ", "an ", "all ", "any ", "files ", "file ", "named ", "called "} {
+				if len(q) >= len(p) && strings.EqualFold(q[:len(p)], p) {
+					q = strings.TrimSpace(q[len(p):])
+					trimmed = true
 				}
 			}
-			q = strings.TrimSuffix(q, " files")
-			q = strings.TrimSuffix(q, " file")
-			q = strings.TrimSpace(q)
-			if q != "" && len(q) < 60 {
-				return q
+			if !trimmed {
+				break
 			}
+		}
+		q = strings.TrimSuffix(q, " files")
+		q = strings.TrimSuffix(q, " file")
+		q = strings.TrimSpace(q)
+		if q != "" && len(q) < 60 {
+			return q
 		}
 	}
 	return "*"
