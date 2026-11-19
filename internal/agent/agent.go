@@ -13,7 +13,10 @@ import (
 
 // Agent orchestrates AI responses and tool execution.
 type Agent struct {
-	aiClient *ai.Client
+	aiClient ai.Provider
+	// ToolApproval lets the host pause a run when a tool needs human approval.
+	// Returning false produces a NextStepInterruption instead of executing.
+	ToolApproval func(call *ai.ToolCall) (bool, error)
 }
 
 const maxDiscoveryToolCalls = 3
@@ -22,12 +25,13 @@ const maxDiscoveryToolCalls = 3
 type RunResult struct {
 	Script      string
 	Explanation string
+	NextStep    NextStep
 }
 
-// NewAgent creates an agent using the provided AI client.
-func NewAgent(aiClient *ai.Client) *Agent {
+// NewAgent creates an agent using the provided AI provider.
+func NewAgent(aiProvider ai.Provider) *Agent {
 	return &Agent{
-		aiClient: aiClient,
+		aiClient: aiProvider,
 	}
 }
 
@@ -225,6 +229,7 @@ type Context struct {
 	History        string
 	FailureHistory string
 	ActiveError    string
+	Objectives     string
 	KnownFolders   []KnownFolder
 }
 
@@ -324,10 +329,14 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	knownFolders := FormatKnownFolders(ctx.KnownFolders)
 
 	// 1. Discovery Plan: planner only needs the active task and directory environment
+	planContent := fmt.Sprintf("TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s\nVerified Known Folders:\n%s",
+		ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir, knownFolders)
+	if ctx.Objectives != "" {
+		planContent += "\n\n" + ctx.Objectives
+	}
 	planInput := []ai.Message{{
-		Role: "user",
-		Content: fmt.Sprintf("TASK:\n%s\n\nENVIRONMENT:\nFolder: %s\nWorking Directory: %s\nParent Directory: %s\nVerified Known Folders:\n%s",
-			ctx.Task, ctx.FolderName, ctx.WorkingDir, ctx.ParentDir, knownFolders),
+		Role:    "user",
+		Content: planContent,
 	}}
 	plan, err := a.aiClient.GetDiscoveryPlan(planInput)
 	if err != nil {
@@ -355,6 +364,9 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 
 		state := fmt.Sprintf("TASK:\n%s\nWorking Directory: %s\nParent Directory: %s\n\nVERIFIED KNOWN FOLDERS:\n%s\n\nCONFIRMED FACTS:\n%s",
 			ctx.Task, ctx.WorkingDir, ctx.ParentDir, knownFolders, formatFacts(facts, "No facts confirmed yet."))
+		if ctx.Objectives != "" {
+			state += "\n\n" + ctx.Objectives
+		}
 
 		action, actionErr := a.aiClient.GetDiscoveryAction(question.Question, state)
 		if actionErr != nil {
@@ -366,6 +378,36 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 				Summary: action.Answer,
 			})
 			continue
+		}
+
+		step := ClassifyToolCall(action.ToolCall)
+		if step.Type == NextStepHandoff {
+			target := strings.TrimSpace(step.HandoffTo)
+			if target == "" {
+				target = "default agent"
+			}
+			facts = append(facts, confirmedFact{
+				ID:      question.ID,
+				Summary: fmt.Sprintf("Handoff accepted: %s (%s)", target, step.Reason),
+			})
+			ui.PrintGray("Handoff: " + target)
+			continue
+		}
+
+		if a.ToolApproval != nil {
+			approved, approvalErr := a.ToolApproval(action.ToolCall)
+			if approvalErr != nil || !approved {
+				reason := "tool approval was denied"
+				if approvalErr != nil {
+					reason = approvalErr.Error()
+				}
+				return &RunResult{NextStep: NextStep{
+					Type:        NextStepInterruption,
+					ToolCalls:   []ai.ToolCall{*action.ToolCall},
+					Interrupted: action.ToolCall,
+					Reason:      reason,
+				}}, "", nil
+			}
 		}
 
 		ui.PrintGray("Tool Call: " + action.ToolCall.Name)
@@ -402,6 +444,10 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	finalSb.WriteString(formatFacts(facts, "No additional filesystem facts required.\n"))
 	finalSb.WriteString("\nGenerate the final script only from confirmed facts. Treat unknown paths as unavailable.")
 
+	if ctx.Objectives != "" {
+		fmt.Fprintf(&finalSb, "\n\n%s", ctx.Objectives)
+	}
+
 	finalInput := []ai.Message{{
 		Role:    "user",
 		Content: finalSb.String(),
@@ -411,7 +457,8 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 		return nil, "AIGenerationFailed", err
 	}
 	if resp.ToolCall != nil {
-		return nil, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
+		step := ClassifyResponse(resp)
+		return &RunResult{NextStep: step}, "AIGenerationFailed", fmt.Errorf("final script generator returned a tool call")
 	}
 
 	// AI based Safety
@@ -445,5 +492,6 @@ func (a *Agent) Run(ctx Context) (*RunResult, string, error) {
 	return &RunResult{
 		Script:      resp.Script,
 		Explanation: resp.Explanation,
+		NextStep:    NextStep{Type: NextStepFinalOutput},
 	}, "", nil
 }

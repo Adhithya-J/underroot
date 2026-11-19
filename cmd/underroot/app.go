@@ -11,9 +11,10 @@ import (
 
 	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/ai"
+	"github.com/Adhithya-J/underroot.git/internal/config"
 	"github.com/Adhithya-J/underroot.git/internal/knownfolders"
+	"github.com/Adhithya-J/underroot.git/internal/objectives"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
-	"github.com/joho/godotenv"
 )
 
 type ActiveError struct {
@@ -54,6 +55,7 @@ type Session struct {
 
 	KnownFolders []knownfolders.Folder
 	Permissions  *Permissions
+	Objectives   *objectives.Recorder
 }
 
 // to be used later
@@ -91,6 +93,14 @@ func (s *Session) KnownFolderFacts() []agent.KnownFolder {
 		}
 	}
 	return facts
+}
+
+// ObjectiveRecitation renders the persisted todo.md objective ledger.
+func (s *Session) ObjectiveRecitation() string {
+	if s.Objectives == nil {
+		return ""
+	}
+	return s.Objectives.Recitation()
 }
 
 func (s *Session) SetActiveError(errorType, errorMsg, script string) {
@@ -131,7 +141,7 @@ func EstimateTokens(txt string) int {
 func EstimatePromptTokens(ctx agent.Context) int {
 	return EstimateTokens(
 		ctx.Task + ctx.WorkingDir + ctx.ParentDir + ctx.FolderName +
-			ctx.History + ctx.ActiveError + ctx.FailureHistory +
+			ctx.History + ctx.ActiveError + ctx.FailureHistory + ctx.Objectives +
 			agent.FormatKnownFolders(ctx.KnownFolders),
 	)
 }
@@ -144,6 +154,9 @@ func (s *Session) TotalTokens() int {
 	}
 	for i := range s.Failures {
 		total += EstimateTokens(s.Failures[i].Summary)
+	}
+	if s.Objectives != nil {
+		total += EstimateTokens(s.Objectives.Recitation())
 	}
 	return total
 }
@@ -210,6 +223,10 @@ func errorGuidance(errorType string) string {
 		return "Fix PowerShell syntax or unsupported parameters before execution."
 	case "ExecutionFailed":
 		return "Use confirmed paths and handle missing items explicitly with throw."
+	case "PermissionDenied":
+		return "A session permission rule blocked this action. Choose a different command that satisfies the policy, or ask the user to change allowed_tools/disallowed_tools."
+	case "ToolApprovalRequired":
+		return "The requested tool needs human approval. Continue with read-only facts already confirmed, or produce a final script that does not require the interrupted tool."
 	default:
 		return "Analyze the error and try a different, safer approach."
 	}
@@ -249,38 +266,39 @@ func BuildContext(session *Session) agent.Context {
 		History:        GetSessionHistory(session),
 		FailureHistory: GetFailureHistory(session),
 		ActiveError:    GetActiveError(session),
+		Objectives:     session.ObjectiveRecitation(),
 		KnownFolders:   session.KnownFolderFacts(),
 	}
 }
 
-func GetClient() *ai.Client {
-	if err := godotenv.Load(); err != nil {
-		fmt.Println(".env file not found")
-	}
-
-	cfg := ai.Config{
-		OpenAIBaseURL: os.Getenv("OpenAIBaseURL"),
-		OpenAIAPIKey:  os.Getenv("OpenAIAPIKey"),
-		OpenAIModel:   os.Getenv("OpenAIModel"),
-		UseMock:       false,
-	}
-
-	client, err := ai.NewClient(cfg)
-	if err != nil {
-		log.Fatalf("OpenAI Client initialization failed: %v", err)
-	}
-	return client
-}
-
 func NewApp() *App {
-	client := GetClient()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("configuration failed: %v", err)
+	}
+
+	provider, err := ai.NewProvider(cfg.AI)
+	if err != nil {
+		log.Fatalf("AI provider initialization failed: %v", err)
+	}
+
+	recorder, recErr := objectives.Default()
+	if recErr != nil {
+		recorder = nil
+	}
+
+	model := cfg.AI.OpenAIModel
+	if cfg.AI.UseMock {
+		model = "mock"
+	}
 
 	return &App{
 		Session: &Session{
-			Model:       os.Getenv("OpenAIModel"),
+			Model:       model,
 			Permissions: NewPermissions(),
+			Objectives:  recorder,
 		},
-		Agent:   agent.NewAgent(client),
+		Agent:   agent.NewAgent(provider),
 		Scanner: bufio.NewReader(os.Stdin),
 	}
 }

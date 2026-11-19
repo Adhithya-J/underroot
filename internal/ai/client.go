@@ -80,19 +80,66 @@ func isRetryableStatus(code int) bool {
 		code == http.StatusGatewayTimeout
 }
 
+// JSONSchema describes an API-level structured response schema.
+type JSONSchema struct {
+	Name   string         `json:"name"`
+	Strict bool           `json:"strict,omitempty"`
+	Schema map[string]any `json:"schema"`
+}
+
+// ResponseFormat requests structured output from the chat completions API.
+type ResponseFormat struct {
+	Type       string      `json:"type"`
+	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
+}
+
+// FunctionDefinition describes a callable function exposed to the model.
+type FunctionDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// ToolDefinition is one tool exposed through the API's native tool calling.
+type ToolDefinition struct {
+	Type     string             `json:"type"`
+	Function FunctionDefinition `json:"function"`
+}
+
 // ChatCompletionsRequest is the request payload for chat completions.
 type ChatCompletionsRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+	Model          string           `json:"model"`
+	Messages       []Message        `json:"messages"`
+	ResponseFormat *ResponseFormat  `json:"response_format,omitempty"`
+	Tools          []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice     any              `json:"tool_choice,omitempty"`
+}
+
+// ResponseToolCall is a native tool call returned by the API.
+type ResponseToolCall struct {
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 // ChatCompletionsResponse is the response payload from chat completions.
 type ChatCompletionsResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string             `json:"content"`
+			ToolCalls []ResponseToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 	} `json:"choices"`
+}
+
+// ChatOptions carries optional structured-output and tool-calling controls.
+type ChatOptions struct {
+	ResponseFormat *ResponseFormat
+	Tools          []ToolDefinition
+	ToolChoice     any
 }
 
 // client should not handle history!!!
@@ -265,6 +312,170 @@ question. User-supplied names are hints only: use search_entries for partial or
 possibly misspelled names, and treat the filesystem result as authoritative.`}
 }
 
+// AgentResponseSchema returns the JSON schema for final agent output.
+func AgentResponseSchema() *ResponseFormat {
+	return &ResponseFormat{
+		Type: "json_schema",
+		JSONSchema: &JSONSchema{
+			Name: "agent_response",
+			Schema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"tool_call": map[string]any{
+						"type": []string{"object", "null"},
+					},
+					"script":      map[string]any{"type": "string"},
+					"explanation": map[string]any{"type": "string"},
+					"is_safe":     map[string]any{"type": "boolean"},
+				},
+				"required": []string{"tool_call", "script", "explanation", "is_safe"},
+			},
+		},
+	}
+}
+
+// DiscoveryPlanSchema returns the JSON schema for a discovery plan.
+func DiscoveryPlanSchema() *ResponseFormat {
+	return &ResponseFormat{
+		Type: "json_schema",
+		JSONSchema: &JSONSchema{
+			Name: "discovery_plan",
+			Schema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"questions": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type":                 "object",
+							"additionalProperties": false,
+							"properties": map[string]any{
+								"id":       map[string]any{"type": "string"},
+								"question": map[string]any{"type": "string"},
+								"required": map[string]any{"type": "boolean"},
+							},
+							"required": []string{"id", "question", "required"},
+						},
+					},
+				},
+				"required": []string{"questions"},
+			},
+		},
+	}
+}
+
+// DiscoveryTools returns native tool definitions for filesystem discovery.
+func DiscoveryTools() []ToolDefinition {
+	stringProperty := map[string]any{"type": "string"}
+	entryType := map[string]any{
+		"type": "string",
+		"enum": []string{"file", "directory", "any"},
+	}
+	limitProperty := map[string]any{"type": "number"}
+
+	return []ToolDefinition{
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "list_dir",
+				Description: "List the direct children of a directory.",
+				Parameters: objectSchema(map[string]any{
+					"path": stringProperty,
+				}, []string{"path"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "find_entry",
+				Description: "Find one exact-name child entry.",
+				Parameters: objectSchema(map[string]any{
+					"path": stringProperty,
+					"name": stringProperty,
+					"type": entryType,
+				}, []string{"path", "name"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "find_file",
+				Description: "Find a bounded number of files with an extension directly in a directory.",
+				Parameters: objectSchema(map[string]any{
+					"path":      stringProperty,
+					"extension": stringProperty,
+					"limit":     limitProperty,
+				}, []string{"path", "extension"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "exists",
+				Description: "Check whether a path exists.",
+				Parameters: objectSchema(map[string]any{
+					"path": stringProperty,
+				}, []string{"path"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "read_file",
+				Description: "Read the first 1000 lines of a file.",
+				Parameters: objectSchema(map[string]any{
+					"path": stringProperty,
+				}, []string{"path"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "search_entries",
+				Description: "Find direct child names containing a query, ignoring case.",
+				Parameters: objectSchema(map[string]any{
+					"path":  stringProperty,
+					"query": stringProperty,
+					"type":  entryType,
+					"limit": limitProperty,
+				}, []string{"path", "query"}),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "user_downloads",
+				Description: "Return the current user's standard Downloads folder.",
+				Parameters:  objectSchema(map[string]any{}, nil),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDefinition{
+				Name:        "handoff",
+				Description: "Hand control to another agent role and continue the task there.",
+				Parameters: objectSchema(map[string]any{
+					"agent":  stringProperty,
+					"reason": stringProperty,
+				}, []string{"agent"}),
+			},
+		},
+	}
+}
+
+func objectSchema(properties map[string]any, required []string) map[string]any {
+	schema := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
 // Validate checks that the client configuration is complete.
 func (cfg Config) Validate() error {
 	if cfg.UseMock {
@@ -402,24 +613,47 @@ func (c *Client) chat(ctx context.Context, input []Message) (*ChatCompletionsRes
 }
 
 func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Message) (*ChatCompletionsResponse, error) {
+	return c.chatWithOptions(ctx, system, input, ChatOptions{})
+}
+
+func (c *Client) chatWithOptions(ctx context.Context, system Message, input []Message, options ChatOptions) (*ChatCompletionsResponse, error) {
 	messages := BuildMessagesWithSystem(system, input)
 
 	body := ChatCompletionsRequest{
-		Model:    c.config.OpenAIModel,
-		Messages: messages,
+		Model:          c.config.OpenAIModel,
+		Messages:       messages,
+		ResponseFormat: options.ResponseFormat,
+		Tools:          options.Tools,
+		ToolChoice:     options.ToolChoice,
 	}
 
 	resp, err := c.makeHTTPRequest(ctx, body)
 	if err != nil {
 		return &ChatCompletionsResponse{}, err
 	}
+
+	// Some OpenAI-compatible servers reject structured output or native tools.
+	// Retry once without those optional extensions so the JSON-prompt fallback
+	// still works on older/local backends.
+	if options.ResponseFormat != nil || len(options.Tools) > 0 {
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnprocessableEntity {
+			_ = resp.Body.Close()
+			body.ResponseFormat = nil
+			body.Tools = nil
+			body.ToolChoice = nil
+			resp, err = c.makeHTTPRequest(ctx, body)
+			if err != nil {
+				return &ChatCompletionsResponse{}, err
+			}
+		}
+	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(body))
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return &ChatCompletionsResponse{}, fmt.Errorf("api returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result ChatCompletionsResponse
@@ -431,27 +665,22 @@ func (c *Client) chatWithSystem(ctx context.Context, system Message, input []Mes
 	if len(result.Choices) == 0 {
 		return &ChatCompletionsResponse{}, fmt.Errorf("empty response")
 	}
-	if strings.TrimSpace(result.Choices[0].Message.Content) == "" {
+	message := result.Choices[0].Message
+	if strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
 		return &ChatCompletionsResponse{}, fmt.Errorf("empty completion content")
 	}
 	return &result, nil
 }
 
-// GetFinalScript generates a script after discovery is complete. It uses a
-// system prompt that forbids tool calls.
+// GetFinalScript generates a script after discovery is complete. It asks the
+// API for schema-constrained output and still validates the parsed JSON.
 func (c *Client) GetFinalScript(input []Message) (*AgentResponse, error) {
 	if c.config.UseMock {
-		if len(input) == 0 {
-			return nil, errors.New("cannot generate a mock response without messages")
-		}
-		return &AgentResponse{
-			Script:      fmt.Sprintf("echo 'Mock final: %s'", input[len(input)-1].Content),
-			Explanation: "Mock final response",
-			IsSafe:      true,
-		}, nil
+		return NewMockProvider().GetFinalScript(input)
 	}
-
-	result, err := c.chatWithSystem(context.Background(), FinalSystemPrompt(), input)
+	result, err := c.chatWithOptions(context.Background(), FinalSystemPrompt(), input, ChatOptions{
+		ResponseFormat: AgentResponseSchema(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +693,12 @@ func (c *Client) GetFinalScript(input []Message) (*AgentResponse, error) {
 
 // GetDiscoveryPlan requests a discovery plan containing questions needed for the task.
 func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
-	result, err := c.chatWithSystem(context.Background(), DiscoveryPlanPrompt(), input)
+	if c.config.UseMock {
+		return NewMockProvider().GetDiscoveryPlan(input)
+	}
+	result, err := c.chatWithOptions(context.Background(), DiscoveryPlanPrompt(), input, ChatOptions{
+		ResponseFormat: DiscoveryPlanSchema(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -486,14 +720,38 @@ func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	return &plan, nil
 }
 
-// GetDiscoveryAction requests an action or answer for the specified discovery question.
+// GetDiscoveryAction requests an action or answer for the specified discovery
+// question. Native tool calls are preferred; JSON content remains a fallback
+// for backends that do not support the tools API.
 func (c *Client) GetDiscoveryAction(question, state string) (*DiscoveryAction, error) {
+	if c.config.UseMock {
+		return NewMockProvider().GetDiscoveryAction(question, state)
+	}
 	input := []Message{{Role: "user", Content: fmt.Sprintf("QUESTION:\n%s\n\nCONFIRMED STATE:\n%s", question, state)}}
-	result, err := c.chatWithSystem(context.Background(), DiscoveryActionPrompt(), input)
+	result, err := c.chatWithOptions(context.Background(), DiscoveryActionPrompt(), input, ChatOptions{
+		Tools:      DiscoveryTools(),
+		ToolChoice: "auto",
+	})
 	if err != nil {
 		return nil, err
 	}
-	cleaned := cleanJSON(result.Choices[0].Message.Content)
+
+	message := result.Choices[0].Message
+	if len(message.ToolCalls) > 0 {
+		call := message.ToolCalls[0]
+		args := map[string]interface{}{}
+		if strings.TrimSpace(call.Function.Arguments) != "" {
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+				return nil, fmt.Errorf("invalid tool-call arguments for %s: %w", call.Function.Name, err)
+			}
+		}
+		return &DiscoveryAction{ToolCall: &ToolCall{
+			Name: call.Function.Name,
+			Args: args,
+		}}, nil
+	}
+
+	cleaned := cleanJSON(message.Content)
 	if cleaned == "" {
 		return nil, errors.New("discovery action contained no content")
 	}
@@ -503,3 +761,5 @@ func (c *Client) GetDiscoveryAction(question, state string) (*DiscoveryAction, e
 	}
 	return &action, nil
 }
+
+var _ Provider = (*Client)(nil)

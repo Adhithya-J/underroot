@@ -5,7 +5,9 @@ import (
 	"io"
 	"strings"
 
+	"github.com/Adhithya-J/underroot.git/internal/agent"
 	"github.com/Adhithya-J/underroot.git/internal/executor"
+	"github.com/Adhithya-J/underroot.git/internal/intent"
 	"github.com/Adhithya-J/underroot.git/internal/ui"
 )
 
@@ -44,6 +46,10 @@ func handleShellCommand(app *App, input string) (handled, exit bool) {
 		app.LoadKnownFolders(true)
 	case "/permissions", "/perms":
 		handlePermissionsCommand(app.Session, fields[1:])
+	case "/todo", "/objectives":
+		ui.PrintTodo(app.Session.ObjectiveRecitation())
+	case "/failures":
+		ui.PrintFailures(GetFailureHistory(app.Session))
 	case "/help":
 		ui.PrintHelp()
 	default:
@@ -55,19 +61,47 @@ func handleShellCommand(app *App, input string) (handled, exit bool) {
 func handlePermissionsCommand(session *Session, args []string) {
 	if len(args) == 0 {
 		allowed, denied := session.Permissions.Counts()
-		ui.PrintPermissions(session.Permissions.Mode().String(), allowed, denied)
+		allowedRules, disallowedRules := session.Permissions.ToolRules()
+		ui.PrintPermissions(session.Permissions.Mode().String(), allowed, denied, allowedRules, disallowedRules)
 		return
 	}
 
-	if strings.EqualFold(args[0], "reset") {
+	switch strings.ToLower(args[0]) {
+	case "reset":
 		session.Permissions.Reset()
 		ui.PrintGray("Session permissions reset to ask mode.")
+		return
+	case "rules":
+		allowedRules, disallowedRules := session.Permissions.ToolRules()
+		ui.PrintPermissions(session.Permissions.Mode().String(), 0, 0, allowedRules, disallowedRules)
+		return
+	case "allow":
+		if len(args) < 2 {
+			ui.PrintGray("Usage: /permissions allow <command-pattern>")
+			return
+		}
+		if err := session.Permissions.AllowTool(strings.Join(args[1:], " ")); err != nil {
+			ui.PrintGray("Invalid permission rule: " + err.Error())
+			return
+		}
+		ui.PrintGray("Added allowed_tools rule: " + strings.Join(args[1:], " "))
+		return
+	case "disallow":
+		if len(args) < 2 {
+			ui.PrintGray("Usage: /permissions disallow <command-pattern>")
+			return
+		}
+		if err := session.Permissions.DisallowTool(strings.Join(args[1:], " ")); err != nil {
+			ui.PrintGray("Invalid permission rule: " + err.Error())
+			return
+		}
+		ui.PrintGray("Added disallowed_tools rule: " + strings.Join(args[1:], " "))
 		return
 	}
 
 	mode, ok := ParsePermissionMode(args[0])
 	if !ok {
-		ui.PrintGray("Usage: /permissions [ask|auto|deny|reset]")
+		ui.PrintGray("Usage: /permissions [ask|auto|deny|allow <rule>|disallow <rule>|rules|reset]")
 		return
 	}
 
@@ -117,6 +151,17 @@ func main() {
 			continue
 		}
 
+		if err := intent.Validate(app.Session.CurrentInput); err != nil {
+			ui.PrintError("Invalid request", err)
+			continue
+		}
+
+		if app.Session.Objectives != nil {
+			if err := app.Session.Objectives.Begin(app.Session.CurrentInput); err != nil {
+				ui.PrintGray("Objective ledger unavailable: " + err.Error())
+			}
+		}
+
 		app.Session.ResetRequestState()
 		succeeded := false
 
@@ -134,6 +179,11 @@ func main() {
 				app.Session.SetActiveError(errType, runErr.Error(), "")
 				continue
 			}
+			if response.NextStep.Type == agent.NextStepInterruption {
+				ui.PrintGray("Tool approval interrupted the run: " + response.NextStep.Reason)
+				app.Session.SetActiveError("ToolApprovalRequired", response.NextStep.Reason, "")
+				continue retryLoop
+			}
 			ui.PrintLine()
 
 			ui.PrintScript(response.Script)
@@ -150,11 +200,14 @@ func main() {
 			}
 			ui.PrintOutput(dryRunOut)
 
-			switch app.Session.Permissions.Check(response.Script) {
+			decision, reason := app.Session.Permissions.Evaluate(response.Script)
+			switch decision {
 			case DecisionDeny:
-				ui.PrintGray("Execution blocked by session permissions.")
-				app.Session.ClearActiveError()
-				break retryLoop
+				ui.PrintGray("Execution blocked by session permissions: " + reason)
+				// A permission denial is a tool result, not a dead end: keep the
+				// evidence in context so the model can try a compliant alternative.
+				app.Session.SetActiveError("PermissionDenied", reason, response.Script)
+				continue retryLoop
 			case DecisionAllow:
 				ui.PrintGray("Session permissions auto-approved this script.")
 			default:
@@ -177,8 +230,8 @@ func main() {
 				case ui.ApprovalNever:
 					app.Session.Permissions.Deny(response.Script)
 					ui.PrintGray("This script is blocked for the rest of the session.")
-					app.Session.ClearActiveError()
-					break retryLoop
+					app.Session.SetActiveError("PermissionDenied", "the user blocked this exact script for the session", response.Script)
+					continue retryLoop
 				}
 			}
 
@@ -198,6 +251,9 @@ func main() {
 			})
 			app.Session.ClearActiveError()
 			succeeded = true
+			if app.Session.Objectives != nil {
+				_ = app.Session.Objectives.Complete(app.Session.CurrentInput, "executed successfully")
+			}
 
 			ui.PrintOutput(psOut)
 			fmt.Println("Success!")
@@ -217,6 +273,12 @@ func main() {
 				ErrorMsg:  active.ErrorMsg,
 				Script:    active.Script,
 			})
+			if app.Session.Objectives != nil {
+				_ = app.Session.Objectives.Fail(
+					app.Session.CurrentInput,
+					fmt.Sprintf("%s: %s", active.ErrorType, truncateText(active.ErrorMsg, 160)),
+				)
+			}
 			ui.PrintGray("All retries failed. A failure summary was added to session context.")
 		}
 

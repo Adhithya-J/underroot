@@ -1,10 +1,12 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Adhithya-J/underroot.git/internal/knownfolders"
+	"github.com/Adhithya-J/underroot.git/internal/objectives"
 )
 
 func TestBuildContextWithoutActiveError(t *testing.T) {
@@ -107,5 +109,28 @@ func TestBuildContextIncludesOnlyPresentKnownFolders(t *testing.T) {
 	}
 	if ctx.KnownFolders[0].Name != "Downloads" || ctx.KnownFolders[0].Path != `C:\Users\test\Downloads` {
 		t.Fatalf("unexpected known folder: %+v", ctx.KnownFolders[0])
+	}
+}
+
+func TestBuildContextRecitesActiveObjective(t *testing.T) {
+	recorder := objectives.New(filepath.Join(t.TempDir(), objectives.FileName))
+	if err := recorder.Begin("archive the log files"); err != nil {
+		t.Fatal(err)
+	}
+
+	session := &Session{
+		FolderName:   "underroot",
+		CurrentDir:   `C:\projects\underroot`,
+		ParentDir:    `C:\projects`,
+		CurrentInput: "archive the log files",
+		Objectives:   recorder,
+	}
+
+	ctx := BuildContext(session)
+	if !strings.Contains(ctx.Objectives, "ACTIVE OBJECTIVE") {
+		t.Fatalf("expected objective recitation, got: %s", ctx.Objectives)
+	}
+	if !strings.Contains(ctx.Objectives, "archive the log files") {
+		t.Fatalf("expected the objective goal, got: %s", ctx.Objectives)
 	}
 }

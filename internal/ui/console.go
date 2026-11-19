@@ -193,9 +193,34 @@ func PrintKnownFolder(name, path string, exists bool) {
 }
 
 // PrintPermissions shows the session permission mode and remembered decisions.
-func PrintPermissions(mode string, allowed, denied int) {
+func PrintPermissions(mode string, allowed, denied int, allowedRules, disallowedRules []string) {
 	fmt.Printf("%sSession permissions%s mode=%s%s%s allowed=%d denied=%d\n",
 		Blue, Reset, Green, mode, Reset, allowed, denied)
+	printRules("allowed_tools", allowedRules)
+	printRules("disallowed_tools", disallowedRules)
+}
+
+func printRules(label string, rules []string) {
+	if len(rules) == 0 {
+		fmt.Printf("%s  %s:%s (none)\n", Gray, label, Reset)
+		return
+	}
+	fmt.Printf("%s  %s:%s\n", Gray, label, Reset)
+	for _, rule := range rules {
+		fmt.Printf("%s    - %s%s\n", Gray, rule, Reset)
+	}
+}
+
+// PrintTodo shows the active objective recitation.
+func PrintTodo(recitation string) {
+	PrintGray("Objectives:")
+	PrintGray(recitation)
+}
+
+// PrintFailures shows durable failure evidence from the session.
+func PrintFailures(failures string) {
+	PrintGray("Durable failure evidence:")
+	PrintGray(failures)
 }
 
 // PrintHelp lists the interactive shell commands.
@@ -203,7 +228,12 @@ func PrintHelp() {
 	PrintGray("Commands:")
 	PrintGray("  /init                  Resolve and save your standard folders")
 	PrintGray("  /permissions [mode]    Show or set ask|auto|deny")
-	PrintGray("  /permissions reset     Forget remembered decisions")
+	PrintGray("  /permissions allow P   Auto-approve commands matching P")
+	PrintGray("  /permissions disallow P Block commands matching P (overrides allow)")
+	PrintGray("  /permissions rules     Show allowed_tools and disallowed_tools")
+	PrintGray("  /permissions reset     Forget remembered decisions and rules")
+	PrintGray("  /todo                  Show the active objective ledger")
+	PrintGray("  /failures              Show durable failure evidence")
 	PrintGray("  /help                  Show this help")
 	PrintGray("  /exit                  Close Underroot")
 }

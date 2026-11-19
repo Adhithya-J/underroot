@@ -9,9 +9,11 @@
 - Tool-assisted directory listing, file reading, and path checks
 - Verified known folders for Desktop, Downloads, Documents, Pictures, Videos, and Music
 - AI, rule-based, and PowerShell AST safety checks
-- Session-level execution permissions
+- Session permissions with `allowed_tools`, `disallowed_tools`, and per-command scoping
+- API-level structured output with native tool calling and a JSON-prompt fallback
+- Request validation for empty, malformed, overlong, and instruction-override input
 - Automatic retries for generation and execution errors
-- Failure summaries that stay in the session context
+- Failure summaries and a persistent `todo.md` objective ledger
 - Explicit approval before a script is executed
 
 ## Requirements
@@ -31,6 +33,26 @@ OpenAIModel=your-model-name
 ```
 
 Do not commit `.env` or other credentials to the repository.
+
+Configuration is loaded by `internal/config`. The standard OpenAI variable names
+are also accepted, and `UNDERROOT_USE_MOCK=true` selects an in-process mock
+provider that exercises discovery and final generation without network calls.
+
+### Permission rules
+
+`allowed_tools` auto-approves matching commands, while `disallowed_tools` blocks
+matching commands and overrides allow rules. The session mode (`ask`, `auto`, or
+`deny`) is the fallback for everything else. Rules accept a command or a
+`PowerShell(Command:argument-glob)` form:
+
+```text
+/permissions allow PowerShell(Get-ChildItem:*)
+/permissions disallow PowerShell(Remove-Item:C:\Windows\*)
+/permissions rules
+```
+
+A denied script is fed back into context as evidence so the model can try a
+compliant alternative instead of stopping immediately.
 
 ## Usage
 
@@ -53,9 +75,14 @@ At the approval prompt you can also type `a` to approve the same script for the 
 ### Interactive commands
 
 - `/init` — resolve your standard Windows folders and write a verified manifest.
-- `/permissions` — show the session permission mode.
-- `/permissions ask|auto|deny` — change how scripts are approved.
-- `/permissions reset` — forget remembered decisions and return to ask mode.
+- `/permissions` — show the session permission mode and rules.
+- `/permissions ask|auto|deny` — change how unmatched scripts are approved.
+- `/permissions allow <rule>` — auto-approve commands matching a rule.
+- `/permissions disallow <rule>` — block commands matching a rule (overrides allow).
+- `/permissions rules` — show `allowed_tools` and `disallowed_tools`.
+- `/permissions reset` — forget remembered decisions and rules.
+- `/todo` — show the active objective ledger.
+- `/failures` — show durable failure evidence.
 - `/help` — list commands.
 
 ### Known folders
@@ -65,6 +92,10 @@ On first run Underroot resolves the current user's Desktop, Downloads, Documents
 ## Safety
 
 Generated scripts can modify files and run commands with the permissions of the current user. Review every script and its effects before approving execution. The safety checks are safeguards, not a guarantee that every request or script is safe.
+
+## Objectives and failure evidence
+
+Each request also updates `.underroot/todo.md` in your user configuration directory. The active objective is recited at the end of the model context so long sessions stay on task. Completed, skipped, and failed objectives remain in the ledger; failures include the error type and a short note so the model can avoid repeating an approach that already failed.
 
 ## Development
 
