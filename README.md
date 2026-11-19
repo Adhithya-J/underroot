@@ -35,8 +35,7 @@ OpenAIModel=your-model-name
 Do not commit `.env` or other credentials to the repository.
 
 Configuration is loaded by `internal/config`. The standard OpenAI variable names
-are also accepted, and `UNDERROOT_USE_MOCK=true` selects an in-process mock
-provider that exercises discovery and final generation without network calls.
+are also accepted. To run fully offline, see [Offline mock](#offline-mock-no-llm-api).
 
 ### Permission rules
 
@@ -71,6 +70,71 @@ Archive all .log files in the current directory
 Review the generated PowerShell script and explanation. Confirm with `Y` or press Enter to execute it. Type `exit`, `quit`, or `q` to close the application.
 
 At the approval prompt you can also type `a` to approve the same script for the rest of the session, or `d` to block it for the rest of the session.
+
+## Offline mock (no LLM API)
+
+Two offline modes are available. Both use the same deterministic scenario engine,
+so they produce the same discovery calls, scripts, explanations, and safety
+verdicts.
+
+### Option 1: in-process mock
+
+```powershell
+$env:UNDERROOT_USE_MOCK = "true"
+go run ./cmd/underroot
+```
+
+No API key, base URL, or model is needed. The status bar shows `mock`.
+
+### Option 2: OpenAI-compatible mock server
+
+This exercises the real HTTP client, structured-output parsing, and native tool
+calling.
+
+```powershell
+go run ./cmd/mockllm -addr 127.0.0.1:8080 -verbose
+```
+
+In another terminal, point the app at it. The repository `.env` already uses
+`http://localhost:8080/`:
+
+```dotenv
+OpenAIBaseURL=http://127.0.0.1:8080/
+OpenAIAPIKey=unused
+OpenAIModel=underroot-mock
+```
+
+Then run `go run ./cmd/underroot`.
+
+### Good scenarios to try
+
+| Prompt | Exercises |
+| --- | --- |
+| `list the files in this folder` | Direct final generation |
+| `list the files in the projects folder` | Discovery (`search_entries`) and a confirmed path |
+| `read README.md` | File discovery, then `Get-Content` |
+| `open my Downloads folder` | Verified known folder, no discovery |
+| `archive all .log files` | Extension discovery, `Compress-Archive` |
+| `delete temporary .tmp files` | Scoped destructive script with a dry-run guard |
+| `create a folder called demo` | `New-Item` |
+| `count the files here` | Grouping by extension |
+| `show the largest files` | Sorting by size |
+| `find the budget report` | Recursive search |
+| `move all .pdf files to Documents` | Verified destination folder |
+| `organize files by extension` | Multi-step mutation |
+| `rename notes.txt to journal.txt` | Single-file rename |
+| `rename all .txt files to .md` | Extension-wide rename |
+| `show disk space` | Drive inventory |
+| `list the top processes` | Process inventory |
+| `simulate failure` | Self-healing retry loop |
+| `delete C:\Windows` | `is_safe: false` AI safety block |
+
+Run mutating scenarios (`delete`, `move`, `organize`, `rename`, `create`,
+`archive`) in a scratch directory, because the scripts target the current
+working directory after your approval.
+
+The mock server also supports `GET /health`, `GET /v1/models`, and an optional
+`-delay 250ms` flag for latency testing.
 
 ### Interactive commands
 

@@ -1,11 +1,5 @@
 package ai
 
-import (
-	"errors"
-	"fmt"
-	"strings"
-)
-
 // Provider is the model-facing surface the agent depends on. Keeping the
 // concrete transport behind an interface lets the application swap in another
 // backend (Anthropic, Ollama, a local mock) without changing agent logic.
@@ -27,10 +21,13 @@ func NewProvider(cfg Config) (Provider, error) {
 	return NewClient(cfg)
 }
 
-// MockProvider is a fully in-process Provider. Unlike the old UseMock branch,
-// it covers discovery as well as final generation, so no code path reaches the
-// network by accident during tests or offline use.
+// MockProvider is a fully in-process Provider. Its defaults delegate to
+// ScenarioEngine, which recognizes common filesystem requests and returns
+// plausible discovery calls and PowerShell. The override fields remain for
+// focused tests.
 type MockProvider struct {
+	Engine *ScenarioEngine
+
 	Plan   *DiscoveryPlan
 	Action *DiscoveryAction
 	Final  *AgentResponse
@@ -44,10 +41,17 @@ var _ Provider = (*MockProvider)(nil)
 
 // NewMockProvider returns a provider whose defaults need no network access.
 func NewMockProvider() *MockProvider {
-	return &MockProvider{}
+	return &MockProvider{Engine: NewScenarioEngine()}
 }
 
-// GetDiscoveryPlan returns the configured plan, an empty plan by default.
+func (m *MockProvider) engine() *ScenarioEngine {
+	if m.Engine == nil {
+		m.Engine = NewScenarioEngine()
+	}
+	return m.Engine
+}
+
+// GetDiscoveryPlan returns the configured plan or a scenario-derived plan.
 func (m *MockProvider) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	if m.PlanFunc != nil {
 		return m.PlanFunc(input)
@@ -55,11 +59,10 @@ func (m *MockProvider) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error)
 	if m.Plan != nil {
 		return m.Plan, nil
 	}
-	return &DiscoveryPlan{}, nil
+	return m.engine().GetDiscoveryPlan(input)
 }
 
-// GetDiscoveryAction returns the configured action, a completed mock answer by
-// default.
+// GetDiscoveryAction returns the configured action or a scenario-derived one.
 func (m *MockProvider) GetDiscoveryAction(question, state string) (*DiscoveryAction, error) {
 	if m.ActionFunc != nil {
 		return m.ActionFunc(question, state)
@@ -67,10 +70,10 @@ func (m *MockProvider) GetDiscoveryAction(question, state string) (*DiscoveryAct
 	if m.Action != nil {
 		return m.Action, nil
 	}
-	return &DiscoveryAction{Answer: "mock discovery answer", Done: true}, nil
+	return m.engine().GetDiscoveryAction(question, state)
 }
 
-// GetFinalScript returns a deterministic mock script that echoes the task.
+// GetFinalScript returns the configured response or a scenario-derived script.
 func (m *MockProvider) GetFinalScript(input []Message) (*AgentResponse, error) {
 	if m.FinalFunc != nil {
 		return m.FinalFunc(input)
@@ -78,17 +81,5 @@ func (m *MockProvider) GetFinalScript(input []Message) (*AgentResponse, error) {
 	if m.Final != nil {
 		return m.Final, nil
 	}
-	if len(input) == 0 {
-		return nil, errors.New("cannot generate a mock response without messages")
-	}
-	return &AgentResponse{
-		Script:      fmt.Sprintf("echo 'Mock final: %s'", sanitizeMockEcho(input[len(input)-1].Content)),
-		Explanation: "Mock final response",
-		IsSafe:      true,
-	}, nil
-}
-
-// sanitizeMockEcho escapes single quotes for a PowerShell single-quoted string.
-func sanitizeMockEcho(text string) string {
-	return strings.ReplaceAll(text, "'", "''")
+	return m.engine().GetFinalScript(input)
 }
