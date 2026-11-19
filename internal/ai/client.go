@@ -148,6 +148,10 @@ func SystemPrompt() Message {
 
 		4. File & Path Handling
 		- Never guess paths.
+		- ENVIRONMENT may include "Verified Known Folders" resolved from Windows
+		  APIs. Treat them as trusted facts: use those absolute paths directly,
+		  without list_dir, exists, or any other discovery tool.
+		- Do not ask a discovery question about a verified known folder.
 		- Resolve relative language explicitly: "parent directory" means the
 		  Parent Directory value in ENVIRONMENT, not the current directory.
 		- Treat a path reported as missing as authoritative; do not retry the
@@ -224,6 +228,9 @@ FINAL SCRIPT MODE
 - If a required folder or image is absent, the script must terminate with
   throw (not Write-Host or Write-Warning) so the application can retry with
   the actual failure.
+- "Verified Known Folders" in the user message are trusted facts resolved from
+  Windows APIs. Use those absolute paths directly and never construct a
+  different path for them.
 - Set is_safe=false for unsafe or insufficiently confirmed actions.`,
 	}
 }
@@ -234,6 +241,9 @@ func DiscoveryPlanPrompt() Message {
 Return only JSON: {"questions":[{"id":"string","question":"string","required":true}]}.
 Identify the minimum facts required to complete the user's task. Always return
 at least one question when the task refers to an unknown file, folder, or path.
+If "Verified Known Folders" in ENVIRONMENT already answer the task, return
+{"questions":[]}. These paths are trusted Windows API results; never ask a
+question about them or call a tool to confirm them.
 Do not call tools, generate PowerShell, guess paths, or include explanations
 outside JSON.`}
 }
@@ -245,9 +255,11 @@ Return only JSON matching:
 {"tool_call":{"name":"tool_name","args":{}},"answer":"","done":false}
 or {"tool_call":null,"answer":"...","done":true}.
 For the current question, either choose exactly one focused tool call or answer
-from confirmed facts. Never generate PowerShell. Use user_downloads with {} only
-for an explicit personal/standard Downloads request. For a generic named folder,
-use the working-directory context to inspect its parent or ancestors. Never use
+from confirmed facts. Verified known folders in the supplied state are trusted
+facts: answer from them directly and never call a tool to resolve them.
+Never generate PowerShell. Use user_downloads with {} only for an explicit
+personal/standard Downloads request. For a generic named folder, use the
+working-directory context to inspect its parent or ancestors. Never use
 list_dir when exists, find_entry, find_file, or search_entries can answer the
 question. User-supplied names are hints only: use search_entries for partial or
 possibly misspelled names, and treat the filesystem result as authoritative.`}
@@ -464,9 +476,8 @@ func (c *Client) GetDiscoveryPlan(input []Message) (*DiscoveryPlan, error) {
 	if err := json.Unmarshal([]byte(cleaned), &plan); err != nil {
 		return nil, fmt.Errorf("invalid discovery plan: %w", err)
 	}
-	if len(plan.Questions) == 0 {
-		return nil, errors.New("discovery plan contained no questions")
-	}
+	// An empty plan is valid: verified known folders or the working directory may
+	// already answer the task without discovery.
 	for _, question := range plan.Questions {
 		if question.ID == "" || question.Question == "" {
 			return nil, errors.New("discovery plan contained an incomplete question")

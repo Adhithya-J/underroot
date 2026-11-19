@@ -29,6 +29,9 @@ go.work.sum
 # env file
 .env
 
+# Underroot user-local configuration / known-folders manifest
+.underroot/
+
 # Editor/IDE
 # .idea/
 # .vscode/

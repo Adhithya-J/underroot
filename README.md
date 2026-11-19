@@ -7,8 +7,11 @@
 - Natural-language file and directory management
 - AI-generated PowerShell scripts
 - Tool-assisted directory listing, file reading, and path checks
-- AI and rule-based safety checks
+- Verified known folders for Desktop, Downloads, Documents, Pictures, Videos, and Music
+- AI, rule-based, and PowerShell AST safety checks
+- Session-level execution permissions
 - Automatic retries for generation and execution errors
+- Failure summaries that stay in the session context
 - Explicit approval before a script is executed
 
 ## Requirements
@@ -44,6 +47,20 @@ Archive all .log files in the current directory
 ```
 
 Review the generated PowerShell script and explanation. Confirm with `Y` or press Enter to execute it. Type `exit`, `quit`, or `q` to close the application.
+
+At the approval prompt you can also type `a` to approve the same script for the rest of the session, or `d` to block it for the rest of the session.
+
+### Interactive commands
+
+- `/init` — resolve your standard Windows folders and write a verified manifest.
+- `/permissions` — show the session permission mode.
+- `/permissions ask|auto|deny` — change how scripts are approved.
+- `/permissions reset` — forget remembered decisions and return to ask mode.
+- `/help` — list commands.
+
+### Known folders
+
+On first run Underroot resolves the current user's Desktop, Downloads, Documents, Pictures, Videos, and Music folders through Windows' Shell API, verifies each path, and writes `.underroot/known-folders.md` in your user configuration directory. Later requests use those verified paths without filesystem discovery. If a folder moves or disappears, the next startup re-resolves it. The manifest stores only local paths and verification metadata.
 
 ## Safety
 

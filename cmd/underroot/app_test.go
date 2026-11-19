@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/Adhithya-J/underroot.git/internal/knownfolders"
 )
 
 func TestBuildContextWithoutActiveError(t *testing.T) {
@@ -53,5 +55,57 @@ func TestBuildContextWithActiveError(t *testing.T) {
 	ctxAfterClear := BuildContext(session)
 	if ctxAfterClear.ActiveError != "" {
 		t.Fatalf("expected empty ActiveError after clear, got: %s", ctxAfterClear.ActiveError)
+	}
+}
+
+func TestFailureSummaryIsRetainedInContext(t *testing.T) {
+	session := &Session{
+		FolderName:   "underroot",
+		CurrentDir:   `C:\projects\underroot`,
+		ParentDir:    `C:\projects`,
+		CurrentInput: "remove the temp folder",
+	}
+
+	session.AddFailure(Failure{
+		UserInput: "remove the temp folder",
+		Attempts:  maxRetries,
+		ErrorType: "ExecutionFailed",
+		ErrorMsg:  "Cannot find path 'C:\\temp' because it does not exist.",
+		Script:    "Remove-Item -Path 'C:\\temp'",
+	})
+
+	ctx := BuildContext(session)
+	if !strings.Contains(ctx.FailureHistory, "Attempts: 3/3") {
+		t.Fatalf("expected attempt count in failure history, got: %s", ctx.FailureHistory)
+	}
+	if !strings.Contains(ctx.FailureHistory, "ExecutionFailed") {
+		t.Fatalf("expected error type in failure history, got: %s", ctx.FailureHistory)
+	}
+	if !strings.Contains(ctx.FailureHistory, "Next approach:") {
+		t.Fatalf("expected guidance in failure history, got: %s", ctx.FailureHistory)
+	}
+	if !strings.Contains(ctx.FailureHistory, "Remove-Item") {
+		t.Fatalf("expected failed script in failure history, got: %s", ctx.FailureHistory)
+	}
+}
+
+func TestBuildContextIncludesOnlyPresentKnownFolders(t *testing.T) {
+	session := &Session{
+		FolderName:   "underroot",
+		CurrentDir:   `C:\projects\underroot`,
+		ParentDir:    `C:\projects`,
+		CurrentInput: "open downloads",
+		KnownFolders: []knownfolders.Folder{
+			{Name: "Downloads", Path: `C:\Users\test\Downloads`, Exists: true},
+			{Name: "Music", Path: `C:\Users\test\Music`, Exists: false},
+		},
+	}
+
+	ctx := BuildContext(session)
+	if len(ctx.KnownFolders) != 1 {
+		t.Fatalf("expected one verified known folder, got %+v", ctx.KnownFolders)
+	}
+	if ctx.KnownFolders[0].Name != "Downloads" || ctx.KnownFolders[0].Path != `C:\Users\test\Downloads` {
+		t.Fatalf("unexpected known folder: %+v", ctx.KnownFolders[0])
 	}
 }
