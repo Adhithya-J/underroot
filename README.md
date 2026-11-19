@@ -7,8 +7,13 @@
 - Natural-language file and directory management
 - AI-generated PowerShell scripts
 - Tool-assisted directory listing, file reading, and path checks
-- AI and rule-based safety checks
+- Verified known folders for Desktop, Downloads, Documents, Pictures, Videos, and Music
+- AI, rule-based, and PowerShell AST safety checks
+- Session permissions with `allowed_tools`, `disallowed_tools`, and per-command scoping
+- API-level structured output with native tool calling and a JSON-prompt fallback
+- Request validation for empty, malformed, overlong, and instruction-override input
 - Automatic retries for generation and execution errors
+- Failure summaries and a persistent `todo.md` objective ledger
 - Explicit approval before a script is executed
 
 ## Requirements
@@ -29,6 +34,26 @@ OpenAIModel=your-model-name
 
 Do not commit `.env` or other credentials to the repository.
 
+Configuration is loaded by `internal/config`. The standard OpenAI variable names
+are also accepted, and `UNDERROOT_USE_MOCK=true` selects an in-process mock
+provider that exercises discovery and final generation without network calls.
+
+### Permission rules
+
+`allowed_tools` auto-approves matching commands, while `disallowed_tools` blocks
+matching commands and overrides allow rules. The session mode (`ask`, `auto`, or
+`deny`) is the fallback for everything else. Rules accept a command or a
+`PowerShell(Command:argument-glob)` form:
+
+```text
+/permissions allow PowerShell(Get-ChildItem:*)
+/permissions disallow PowerShell(Remove-Item:C:\Windows\*)
+/permissions rules
+```
+
+A denied script is fed back into context as evidence so the model can try a
+compliant alternative instead of stopping immediately.
+
 ## Usage
 
 Start the assistant from the repository root:
@@ -45,9 +70,32 @@ Archive all .log files in the current directory
 
 Review the generated PowerShell script and explanation. Confirm with `Y` or press Enter to execute it. Type `exit`, `quit`, or `q` to close the application.
 
+At the approval prompt you can also type `a` to approve the same script for the rest of the session, or `d` to block it for the rest of the session.
+
+### Interactive commands
+
+- `/init` — resolve your standard Windows folders and write a verified manifest.
+- `/permissions` — show the session permission mode and rules.
+- `/permissions ask|auto|deny` — change how unmatched scripts are approved.
+- `/permissions allow <rule>` — auto-approve commands matching a rule.
+- `/permissions disallow <rule>` — block commands matching a rule (overrides allow).
+- `/permissions rules` — show `allowed_tools` and `disallowed_tools`.
+- `/permissions reset` — forget remembered decisions and rules.
+- `/todo` — show the active objective ledger.
+- `/failures` — show durable failure evidence.
+- `/help` — list commands.
+
+### Known folders
+
+On first run Underroot resolves the current user's Desktop, Downloads, Documents, Pictures, Videos, and Music folders through Windows' Shell API, verifies each path, and writes `.underroot/known-folders.md` in your user configuration directory. Later requests use those verified paths without filesystem discovery. If a folder moves or disappears, the next startup re-resolves it. The manifest stores only local paths and verification metadata.
+
 ## Safety
 
 Generated scripts can modify files and run commands with the permissions of the current user. Review every script and its effects before approving execution. The safety checks are safeguards, not a guarantee that every request or script is safe.
+
+## Objectives and failure evidence
+
+Each request also updates `.underroot/todo.md` in your user configuration directory. The active objective is recited at the end of the model context so long sessions stay on task. Completed, skipped, and failed objectives remain in the ledger; failures include the error type and a short note so the model can avoid repeating an approach that already failed.
 
 ## Development
 

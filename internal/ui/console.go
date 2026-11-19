@@ -49,16 +49,38 @@ func ReadInput(reader *bufio.Reader) (string, error) {
 	return strings.TrimSpace(txt), nil
 }
 
+// Approval is the user's response to an execution approval prompt.
+type Approval int
+
+const (
+	// ApprovalSkip means do not execute the script.
+	ApprovalSkip Approval = iota
+	// ApprovalOnce means execute this script once.
+	ApprovalOnce
+	// ApprovalAlways means execute and remember this script for the session.
+	ApprovalAlways
+	// ApprovalNever means block and remember this script for the session.
+	ApprovalNever
+)
+
 // AskForApproval reads whether the user approves script execution.
-func AskForApproval(reader *bufio.Reader) (bool, error) {
-	fmt.Printf("%sDo you want to execute the script (Y/n): %s", Blue, Reset)
+func AskForApproval(reader *bufio.Reader) (Approval, error) {
+	fmt.Printf("%sDo you want to execute the script? (Y/n/a=always/d=never): %s", Blue, Reset)
 	txt, err := reader.ReadString('\n') // single quotes!
 	if err != nil && err != io.EOF {
-		return false, err
+		return ApprovalSkip, err
 	}
-	txt = strings.TrimSpace(txt)
-	lowerTxt := strings.ToLower(txt)
-	return lowerTxt == "y" || lowerTxt == "", nil
+
+	switch strings.ToLower(strings.TrimSpace(txt)) {
+	case "", "y", "yes":
+		return ApprovalOnce, nil
+	case "a", "always":
+		return ApprovalAlways, nil
+	case "d", "never":
+		return ApprovalNever, nil
+	default:
+		return ApprovalSkip, nil
+	}
 }
 
 // PrintBanner prints the application welcome banner.
@@ -67,6 +89,7 @@ func PrintBanner() {
 	fmt.Printf("%s%sUNDERROOT%s%s - AI Shell Agent%s\n", Bold, Blue, Reset, Gray, Reset)
 	PrintLine()
 	PrintGray("Press Enter to continue")
+	PrintGray("Type /init to resolve standard folders, /help for commands")
 	PrintGray("Type 'exit' or 'quit' to close")
 	PrintLine()
 }
@@ -155,6 +178,64 @@ func PrintPromptBar(parent, folder, model string, tokens int) {
 	fmt.Printf("%s%s · %d/4096 tokens%s\n", Gray, parent, tokens, Reset)
 	PrintLine()
 	fmt.Print("❯ ")
+}
+
+// PrintKnownFolder prints one resolved known folder and its status.
+func PrintKnownFolder(name, path string, exists bool) {
+	status := Green + "available" + Reset
+	if !exists {
+		status = Yellow + "unavailable" + Reset
+	}
+	if strings.TrimSpace(path) == "" {
+		path = "(not resolved)"
+	}
+	fmt.Printf("%s- %s:%s %s (%s)\n", Gray, name, Reset, path, status)
+}
+
+// PrintPermissions shows the session permission mode and remembered decisions.
+func PrintPermissions(mode string, allowed, denied int, allowedRules, disallowedRules []string) {
+	fmt.Printf("%sSession permissions%s mode=%s%s%s allowed=%d denied=%d\n",
+		Blue, Reset, Green, mode, Reset, allowed, denied)
+	printRules("allowed_tools", allowedRules)
+	printRules("disallowed_tools", disallowedRules)
+}
+
+func printRules(label string, rules []string) {
+	if len(rules) == 0 {
+		fmt.Printf("%s  %s:%s (none)\n", Gray, label, Reset)
+		return
+	}
+	fmt.Printf("%s  %s:%s\n", Gray, label, Reset)
+	for _, rule := range rules {
+		fmt.Printf("%s    - %s%s\n", Gray, rule, Reset)
+	}
+}
+
+// PrintTodo shows the active objective recitation.
+func PrintTodo(recitation string) {
+	PrintGray("Objectives:")
+	PrintGray(recitation)
+}
+
+// PrintFailures shows durable failure evidence from the session.
+func PrintFailures(failures string) {
+	PrintGray("Durable failure evidence:")
+	PrintGray(failures)
+}
+
+// PrintHelp lists the interactive shell commands.
+func PrintHelp() {
+	PrintGray("Commands:")
+	PrintGray("  /init                  Resolve and save your standard folders")
+	PrintGray("  /permissions [mode]    Show or set ask|auto|deny")
+	PrintGray("  /permissions allow P   Auto-approve commands matching P")
+	PrintGray("  /permissions disallow P Block commands matching P (overrides allow)")
+	PrintGray("  /permissions rules     Show allowed_tools and disallowed_tools")
+	PrintGray("  /permissions reset     Forget remembered decisions and rules")
+	PrintGray("  /todo                  Show the active objective ledger")
+	PrintGray("  /failures              Show durable failure evidence")
+	PrintGray("  /help                  Show this help")
+	PrintGray("  /exit                  Close Underroot")
 }
 
 // ShouldExit reports whether input requests that the application exit.

@@ -58,3 +58,37 @@ func TestSummarizeToolResultReadFile(t *testing.T) {
 		t.Fatalf("expected file summary, got: %s", res)
 	}
 }
+
+func TestFormatKnownFolders(t *testing.T) {
+	formatted := FormatKnownFolders([]KnownFolder{
+		{Name: "Desktop", Path: `C:\Users\test\Desktop`},
+		{Name: "Downloads", Path: `C:\Users\test\Downloads`},
+	})
+	if !strings.Contains(formatted, "- Desktop: C:\\Users\\test\\Desktop") {
+		t.Fatalf("expected Desktop in formatted folders, got: %s", formatted)
+	}
+	if !strings.Contains(formatted, "- Downloads: C:\\Users\\test\\Downloads") {
+		t.Fatalf("expected Downloads in formatted folders, got: %s", formatted)
+	}
+
+	if empty := FormatKnownFolders(nil); !strings.Contains(empty, "discovery") {
+		t.Fatalf("expected a discovery fallback for no folders, got: %s", empty)
+	}
+}
+
+func TestMatchKnownFoldersUsesWholeWords(t *testing.T) {
+	folders := []KnownFolder{
+		{Name: "Music", Path: `C:\Users\test\Music`},
+		{Name: "Downloads", Path: `C:\Users\test\Downloads`},
+	}
+
+	if matches := matchKnownFolders("I am a musician", folders); len(matches) != 0 {
+		t.Fatalf("expected no partial-word match, got %+v", matches)
+	}
+	if matches := matchKnownFolders("open my music folder", folders); len(matches) != 1 || matches[0].Name != "Music" {
+		t.Fatalf("expected the Music folder to match, got %+v", matches)
+	}
+	if matches := matchKnownFolders("move Desktop files to Downloads", folders); len(matches) != 1 || matches[0].Name != "Downloads" {
+		t.Fatalf("expected the Downloads folder to match, got %+v", matches)
+	}
+}
